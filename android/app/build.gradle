@@ -1,0 +1,15 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'nl.cftechniek.rotoras'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'nl.cftechniek.rotoras'
+        minSdk 26
+        targetSdk 35
+        versionCode 22
+        versionName '0.22.0'
+    }
+    buildTypes { release { signingConfig signingConfigs.debug; minifyEnabled false } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'androidx.webkit:webkit:1.12.1' }

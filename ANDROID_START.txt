@@ -1,0 +1,19 @@
+ROTORAS GENERATOR VOOR ANDROID - v0.22 (eerste testversie)
+
+Installeer de APK op Android 8.0 of nieuwer. Gericht op tabletgebruik;
+in liggende stand is er de meeste ruimte voor invoer en profielschets.
+
+Projecten opslaan en openen werkt via de Android-bestandskiezer. Gebruik
+.rotoras.json om alle invoer met Windows uit te wisselen. CSV is voor Inventor.
+Afdrukken / PDF opent de Android-afdrukfunctie; beschikbaarheid van printers
+hangt af van de afdrukdiensten op het apparaat.
+De generator wordt in de app meegeleverd en gebruikt geen internetverbinding.
+Invoer wordt lokaal automatisch bewaard, ook bij wisselen naar een andere app.
+
+De eerste APK gebruikt testondertekening. De bouwtaak bewaart de testsleutel
+in GitHub-cache voor volgende testupdates. Bij verlies van die cache kan
+een herinstallatie nodig zijn: sla projecten daarom op voordat je bijwerkt.
+Voor een definitieve distributieversie komt een vaste release-ondertekening.
+
+GitHub bouwt de APK, controleert de handtekening en laat de app op een
+Android-emulator starten. Test openen, opslaan en afdrukken ook op je tablet.

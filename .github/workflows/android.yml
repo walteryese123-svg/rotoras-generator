@@ -1,0 +1,76 @@
+name: Bouw Rotoras Android
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['android/**', 'src/**', 'package*.json', 'index.html', 'vite.config.ts', '.github/workflows/android.yml']
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Bewaar ondertekening voor testupdates
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: rotoras-android-test-key-v1
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Android SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Neem generator op in Android-app
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp -R dist/. android/app/src/main/assets/
+      - name: Bouw installeerbare APK
+        working-directory: android
+        run: gradle assembleRelease lintRelease --no-daemon
+      - name: Controleer pakket en ondertekening
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging android/app/build/outputs/apk/release/app-release.apk
+          cp android/app/build/outputs/apk/release/app-release.apk Rotoras_Generator_v0.22_Android.apk
+          sha256sum Rotoras_Generator_v0.22_Android.apk > Rotoras_Generator_v0.22_Android.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rotoras-Generator-Android
+          path: |
+            Rotoras_Generator_v0.22_Android.apk
+            Rotoras_Generator_v0.22_Android.sha256
+          if-no-files-found: error
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Controleer starten op Android-emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: Nexus 7
+          disable-animations: true
+          script: |
+            adb install -r Rotoras_Generator_v0.22_Android.apk
+            adb logcat -c
+            adb shell am start -W -n nl.cftechniek.rotoras/.MainActivity
+            sleep 10
+            adb shell pidof nl.cftechniek.rotoras
+            adb logcat -d -s AndroidRuntime:E > android-runtime.txt
+            if grep -q 'FATAL EXCEPTION' android-runtime.txt; then cat android-runtime.txt; exit 1; fi

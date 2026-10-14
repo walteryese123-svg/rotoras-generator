@@ -121,3 +121,16 @@
 .input-workspace .shaft-input>.checks .check-title{flex-wrap:wrap;gap:5px}
 .input-workspace .shaft-input>.checks .check-title>span:last-child{font-size:9px}
 .input-workspace .center>.preview-card{flex:1;min-height:0}
+
+.android-app .app>header{padding:8px 12px;gap:8px}
+.android-app .brand p,.android-app .version{display:none}
+.android-app .brand h1{font-size:16px}
+.android-app .brand-icon{width:32px;height:32px}
+.android-app nav button{padding:8px;font-size:11px;min-height:40px}
+.android-app main{padding-left:12px;padding-right:12px}
+.android-app footer{padding:0 12px 8px;font-size:9px}
+.android-app input,.android-app select{font-size:14px}
+.android-app .input-panel-tabs button{min-height:42px}
+.android-app .shaft-table td{padding-top:6px;padding-bottom:6px}
+.android-app .input-workspace .preview-foot>span{display:none}
+@media(max-width:700px){.android-app .input-workspace .center>.project-bar{grid-template-columns:1fr 45px 1fr}.android-app .project-bar .stat strong{font-size:13px}.android-app .project-bar .stat>span{font-size:8px}.android-app .project-bar .primary{padding:6px}.android-app .project-bar input{font-size:13px}.android-app .input-workspace .table-workspace{grid-template-rows:minmax(0,42%) minmax(0,1fr)}}

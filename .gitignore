@@ -3,3 +3,7 @@ dist/
 portable/
 src-tauri/target/
 *.log
+android/.gradle/
+android/local.properties
+android/**/build/
+android/app/src/main/assets/
