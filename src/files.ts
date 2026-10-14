@@ -5,6 +5,8 @@ export const android=!!window.RotorasAndroid;
 const requests=new Map<string,{resolve:(value:any)=>void;reject:(error:Error)=>void}>();let requestId=0;
 function androidRequest<T>(action:string,args:Record<string,string>={}):Promise<T>{return new Promise((resolve,reject)=>{const id=String(++requestId);requests.set(id,{resolve,reject});try{window.RotorasAndroid!.request(JSON.stringify({id,action,...args}));}catch(e){requests.delete(id);reject(e);}});}
 if(android){
+ if(!Array.prototype.at)Object.defineProperty(Array.prototype,'at',{value:function(index:number){const n=Math.trunc(Number(index)||0);return this[n<0?this.length+n:n];},writable:true,configurable:true});
+ if(!window.structuredClone)window.structuredClone=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
  document.documentElement.classList.add('android-app');
  window.rotorasAndroidResult=result=>{const q=requests.get(result.id);if(!q)return;requests.delete(result.id);if(result.error)q.reject(new Error(result.error));else q.resolve(result.value);};
  window.print=()=>{void androidRequest('print').catch(e=>window.alert(String(e)));};

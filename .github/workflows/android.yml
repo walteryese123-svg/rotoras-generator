@@ -65,7 +65,8 @@ jobs:
       - name: Controleer starten op Android-emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          api-level: 35
+          emulator-boot-timeout: 180
           arch: x86_64
           profile: Nexus 7
           disable-animations: true
