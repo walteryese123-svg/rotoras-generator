@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['android/**', 'src/**', 'package*.json', 'index.html', 'vite.config.ts', '.github/workflows/android.yml']
+    paths: ['android/**', 'src/**', 'package*.json', 'index.html', 'vite.config.ts', 'tests/**', 'inventor/**', 'examples/**', '.gitattributes', '.github/workflows/android.yml']
 permissions:
   contents: read
 jobs:

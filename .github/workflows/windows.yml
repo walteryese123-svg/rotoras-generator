@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths: ['src/**', 'src-tauri/**', 'scripts/**', 'tests/**', 'inventor/**', 'examples/**', 'package*.json', 'index.html', 'vite.config.ts', 'tsconfig.json', '.gitattributes', '.github/workflows/windows.yml']
   pull_request:
 permissions:
   contents: read
