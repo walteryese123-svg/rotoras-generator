@@ -1,0 +1,4 @@
+Sectie;Diameter;Passing;Lengte;OvergangRechts;Radius;Diepte;Breedte;SpieBegin;SpieLengte;SpieBreedte;SpieDiepte;BuitenMaat;BuitenHoek;EindLinksMaat;EindLinksHoek;EindRechtsMaat;EindRechtsHoek
+1;45;;50;DIN509E;1;0,2;2,5;;;;;2;15;1;45;;
+2;40;;50;DIN509E;1;0,2;2,5;;;;;2;15;;;;
+3;45;;50;;;;;;;;;;;;;1;45

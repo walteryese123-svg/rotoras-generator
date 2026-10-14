@@ -1,0 +1,2968 @@
+﻿' ============================================================
+' ROTORAS GENERATOR 2.3.2
+' ============================================================
+'
+' CSV:
+' Sectie;Diameter;Passing;Lengte;OvergangRechts;Radius;Diepte;Breedte;SpieBegin;SpieLengte;SpieBreedte;SpieDiepte
+'
+' Optionele CSV-kolommen 13 t/m 18 (app 0.4):
+' BuitenMaat;BuitenHoek;EindLinksMaat;EindLinksHoek;EindRechtsMaat;EindRechtsHoek
+' Maat = axiale lengte in mm. Hoek = graden ten opzichte van de as.
+' Radiale afname = maat * tan(hoek). Blanco hoek bij actieve maat = 45 graden.
+' EindLinks uitsluitend eerste rij, EindRechts uitsluitend laatste rij.
+'
+' Ondersteunde overgangen:
+' - Radius
+' - Chamfer
+' - DIN509E
+' - DIN76-1 B (metrische grove draad; tabelbereik M1 t/m M68)
+'
+'
+' ============================================================
+' DIN509E v2.1
+' ============================================================
+'
+' Gewenste contour:
+'
+' kleine Ø
+'
+' -------------------------\
+'                           \ 15°
+'                            \____________
+'                                         ╮
+'                                         ) R
+'                                         │
+'                                         │ grote Ø
+'
+'
+' Radius  = R
+' Diepte  = t, radiaal
+' Breedte = f, axiaal vanaf begin 15° tot borst
+'
+'
+' BELANGRIJKE WIJZIGING v2.1:
+'
+' De gewenste radius kan boven de oorspronkelijke kleine
+' diameter uitkomen.
+'
+' Bijvoorbeeld:
+'
+' Ø40  -> radius = 20.0 mm
+' t0.2 -> bodem = 19.8 mm
+' R1   -> einde radius = 20.8 mm
+'
+' Tussen radius 20.0 en 20.8 mm is links van de oorspronkelijke
+' borst geen materiaal aanwezig.
+'
+' Daarom:
+'
+' STAP 1 = klein stuk materiaal toevoegen met REVOLVE JOIN
+' STAP 2 = DIN509E-profiel maken met REVOLVE CUT
+'
+' Hierdoor kan de definitieve vorm worden:
+'
+' 15° -> bodem -> R -> borst
+'
+' zonder extra schuine lijn of extra borstje.
+'
+' ============================================================
+
+
+
+' ============================================================
+' 1. CONTROLE ACTIEF DOCUMENT
+' ============================================================
+
+If ThisApplication.ActiveDocument.DocumentType <> _
+    DocumentTypeEnum.kPartDocumentObject Then
+
+    MessageBox.Show( _
+        "Open eerst een leeg Part (.ipt).", _
+        "Rotoras Generator 2.3.2")
+
+    Return
+
+End If
+
+
+Dim oDoc As PartDocument
+oDoc = ThisApplication.ActiveDocument
+
+
+Dim oDef As PartComponentDefinition
+oDef = oDoc.ComponentDefinition
+
+
+Dim tg As TransientGeometry
+tg = ThisApplication.TransientGeometry
+
+
+
+' ============================================================
+' 2. CSV SELECTEREN
+' ============================================================
+
+Dim dlg As New System.Windows.Forms.OpenFileDialog
+
+dlg.Title = "Selecteer CSV voor rotoras"
+dlg.Filter = "CSV bestanden (*.csv)|*.csv"
+dlg.Multiselect = False
+
+
+If dlg.ShowDialog() <> _
+    System.Windows.Forms.DialogResult.OK Then
+
+    Return
+
+End If
+
+
+Dim csvPath As String
+csvPath = dlg.FileName
+
+
+
+' ============================================================
+' 3. CSV INLEZEN
+' ============================================================
+
+Dim regels() As String
+regels = System.IO.File.ReadAllLines(csvPath)
+
+
+If regels.Length < 2 Then
+
+    MessageBox.Show( _
+        "CSV bevat geen secties.", _
+        "Rotoras Generator 2.3.2")
+
+    Return
+
+End If
+
+
+
+Dim afKolomAantal As Integer = regels(0).Trim().TrimStart(ChrW(&HFEFF)).Split(";"c).Length
+If afKolomAantal <> 12 AndAlso afKolomAantal <> 18 Then
+    MessageBox.Show("Gebruik een CSV met 12 kolommen of de nieuwe 18-koloms app-export.", "Rotoras Generator 2.3.2")
+    Return
+End If
+If afKolomAantal = 18 Then
+    Dim afHeader() As String = regels(0).Trim().TrimStart(ChrW(&HFEFF)).Split(";"c)
+    Dim afNamen() As String = {"BuitenMaat", "BuitenHoek", "EindLinksMaat", "EindLinksHoek", "EindRechtsMaat", "EindRechtsHoek"}
+    For afJ As Integer = 0 To 5
+        If Not String.Equals(afHeader(12 + afJ).Trim(), afNamen(afJ), StringComparison.OrdinalIgnoreCase) Then
+            MessageBox.Show("Onbekende afschuiningkolommen. Exporteer opnieuw uit de app.", "Rotoras Generator 2.3.2")
+            Return
+        End If
+    Next
+End If
+Dim afData As New List(Of Double())
+
+Dim diameters As New List(Of Double)
+Dim lengtes As New List(Of Double)
+Dim overgangen As New List(Of String)
+Dim radii As New List(Of Double)
+Dim dieptes As New List(Of Double)
+Dim breedtes As New List(Of Double)
+
+' Onafhankelijke spiebanen uit sectiekolommen en extra SPIE-regels
+Dim spieBegin As New List(Of Double)
+Dim spieLengte As New List(Of Double)
+Dim spieBreedte As New List(Of Double)
+Dim spieDiepte As New List(Of Double)
+Dim passingen As New List(Of String)
+
+
+
+For i As Integer = 1 To regels.Length - 1
+
+
+    If regels(i).Trim() = "" Then
+        Continue For
+    End If
+
+
+    Dim velden() As String
+    velden = regels(i).Split(";"c)
+
+
+    If velden.Length < 4 Then
+
+        MessageBox.Show( _
+            "Fout in CSV op regel " & (i + 1), _
+            "Rotoras Generator 2.3.2")
+
+        Return
+
+    End If
+
+
+
+    ' Extra onafhankelijke spiebaan; geen cilindrische sectie aanmaken.
+    If String.Equals(velden(0).Trim(), "SPIE", StringComparison.OrdinalIgnoreCase) Then
+        If velden.Length <> afKolomAantal Then
+            MessageBox.Show("Onjuist aantal kolommen in losse spiebaan op regel " & (i + 1), "Rotoras Generator 2.3.2")
+            Return
+        End If
+        For keyOnlyColumn As Integer = 1 To velden.Length - 1
+            If (keyOnlyColumn < 8 OrElse keyOnlyColumn > 11) AndAlso velden(keyOnlyColumn).Trim() <> "" Then
+                MessageBox.Show("Losse spiebaan bevat sectiegegevens op regel " & (i + 1), "Rotoras Generator 2.3.2")
+                Return
+            End If
+        Next
+        Dim keyOnlyValues(3) As Double
+        For keyOnlyIndex As Integer = 0 To 3
+            If Not Double.TryParse(velden(8 + keyOnlyIndex).Trim().Replace(",", "."), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, keyOnlyValues(keyOnlyIndex)) OrElse Double.IsNaN(keyOnlyValues(keyOnlyIndex)) OrElse Double.IsInfinity(keyOnlyValues(keyOnlyIndex)) Then
+                MessageBox.Show("Ongeldige losse spiebaan op regel " & (i + 1), "Rotoras Generator 2.3.2")
+                Return
+            End If
+        Next
+        If keyOnlyValues(0) < 0 OrElse keyOnlyValues(1) <= 0 OrElse keyOnlyValues(2) <= 0 OrElse keyOnlyValues(3) <= 0 Then
+            MessageBox.Show("Losse spiebaan vereist begin >= 0 en positieve lengte, breedte en bodemdiameter.", "Rotoras Generator 2.3.2")
+            Return
+        End If
+        spieBegin.Add(keyOnlyValues(0))
+        spieLengte.Add(keyOnlyValues(1))
+        spieBreedte.Add(keyOnlyValues(2))
+        spieDiepte.Add(keyOnlyValues(3))
+        Continue For
+    End If
+
+    ' --------------------------------------------------------
+    ' DIAMETER
+    ' --------------------------------------------------------
+
+    Dim dTekst As String
+    dTekst = velden(1).Trim().Replace(",", ".")
+
+    Dim d As Double
+
+
+    If Not Double.TryParse( _
+        dTekst, _
+        System.Globalization.NumberStyles.Any, _
+        System.Globalization.CultureInfo.InvariantCulture, _
+        d) Then
+
+        MessageBox.Show( _
+            "Ongeldige diameter op regel " & (i + 1), _
+            "Rotoras Generator 2.3.2")
+
+        Return
+
+    End If
+
+
+
+    ' --------------------------------------------------------
+    ' PASSING / TOLERANTIE
+    ' --------------------------------------------------------
+
+    Dim passingTekst As String = ""
+    If velden.Length >= 3 Then
+        passingTekst = velden(2).Trim()
+    End If
+
+    ' --------------------------------------------------------
+    ' LENGTE
+    ' --------------------------------------------------------
+
+    Dim lTekst As String
+    lTekst = velden(3).Trim().Replace(",", ".")
+
+    Dim L As Double
+
+
+    If Not Double.TryParse( _
+        lTekst, _
+        System.Globalization.NumberStyles.Any, _
+        System.Globalization.CultureInfo.InvariantCulture, _
+        L) Then
+
+        MessageBox.Show( _
+            "Ongeldige lengte op regel " & (i + 1), _
+            "Rotoras Generator 2.3.2")
+
+        Return
+
+    End If
+
+
+    If d <= 0 Or L <= 0 Then
+
+        MessageBox.Show( _
+            "Diameter en lengte moeten groter zijn dan 0." & _
+            vbCrLf & _
+            "CSV-regel: " & (i + 1), _
+            "Rotoras Generator 2.3.2")
+
+        Return
+
+    End If
+
+
+
+    ' --------------------------------------------------------
+    ' OVERGANG
+    ' --------------------------------------------------------
+
+    Dim overgangTekst As String
+    overgangTekst = ""
+
+    If velden.Length >= 5 Then
+        overgangTekst = velden(4).Trim()
+    End If
+
+
+
+    ' --------------------------------------------------------
+    ' RADIUS
+    ' --------------------------------------------------------
+
+    Dim r As Double
+    r = 0
+
+
+    If velden.Length >= 6 Then
+
+        Dim rTekst As String
+        rTekst = velden(5).Trim().Replace(",", ".")
+
+        If rTekst <> "" Then
+
+            If Not Double.TryParse( _
+                rTekst, _
+                System.Globalization.NumberStyles.Any, _
+                System.Globalization.CultureInfo.InvariantCulture, _
+                r) Then
+
+                MessageBox.Show( _
+                    "Ongeldige radius op regel " & (i + 1), _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End If
+
+        End If
+
+    End If
+
+
+
+    ' --------------------------------------------------------
+    ' DIEPTE
+    ' --------------------------------------------------------
+
+    Dim t As Double
+    t = 0
+
+
+    If velden.Length >= 7 Then
+
+        Dim tTekst As String
+        tTekst = velden(6).Trim().Replace(",", ".")
+
+        If tTekst <> "" Then
+
+            If Not Double.TryParse( _
+                tTekst, _
+                System.Globalization.NumberStyles.Any, _
+                System.Globalization.CultureInfo.InvariantCulture, _
+                t) Then
+
+                MessageBox.Show( _
+                    "Ongeldige diepte op regel " & (i + 1), _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End If
+
+        End If
+
+    End If
+
+
+
+    ' --------------------------------------------------------
+    ' BREEDTE
+    ' --------------------------------------------------------
+
+    Dim b As Double
+    b = 0
+
+
+    If velden.Length >= 8 Then
+
+        Dim bTekst As String
+        bTekst = velden(7).Trim().Replace(",", ".")
+
+        If bTekst <> "" Then
+
+            If Not Double.TryParse( _
+                bTekst, _
+                System.Globalization.NumberStyles.Any, _
+                System.Globalization.CultureInfo.InvariantCulture, _
+                b) Then
+
+                MessageBox.Show( _
+                    "Ongeldige breedte op regel " & (i + 1), _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End If
+
+        End If
+
+    End If
+
+
+
+    ' --------------------------------------------------------
+    ' SPIEBAAN - kolommen 9 t/m 12
+    ' --------------------------------------------------------
+
+    Dim sbBegin As Double = 0
+    Dim sbLengte As Double = 0
+    Dim sbBreedte As Double = 0
+    Dim sbDiepte As Double = 0
+
+    If velden.Length >= 9 AndAlso velden(8).Trim() <> "" Then
+        If Not Double.TryParse(velden(8).Trim().Replace(",", "."), _
+            System.Globalization.NumberStyles.Any, _
+            System.Globalization.CultureInfo.InvariantCulture, sbBegin) Then
+            MessageBox.Show("Ongeldig beginpunt spiebaan op regel " & (i + 1), "Rotoras Generator 2.3.2")
+            Return
+        End If
+    End If
+
+    If velden.Length >= 10 AndAlso velden(9).Trim() <> "" Then
+        If Not Double.TryParse(velden(9).Trim().Replace(",", "."), _
+            System.Globalization.NumberStyles.Any, _
+            System.Globalization.CultureInfo.InvariantCulture, sbLengte) Then
+            MessageBox.Show("Ongeldige spiebaanlengte op regel " & (i + 1), "Rotoras Generator 2.3.2")
+            Return
+        End If
+    End If
+
+    If velden.Length >= 11 AndAlso velden(10).Trim() <> "" Then
+        If Not Double.TryParse(velden(10).Trim().Replace(",", "."), _
+            System.Globalization.NumberStyles.Any, _
+            System.Globalization.CultureInfo.InvariantCulture, sbBreedte) Then
+            MessageBox.Show("Ongeldige spiebaanbreedte op regel " & (i + 1), "Rotoras Generator 2.3.2")
+            Return
+        End If
+    End If
+
+    If velden.Length >= 12 AndAlso velden(11).Trim() <> "" Then
+        If Not Double.TryParse(velden(11).Trim().Replace(",", "."), _
+            System.Globalization.NumberStyles.Any, _
+            System.Globalization.CultureInfo.InvariantCulture, sbDiepte) Then
+            MessageBox.Show("Ongeldige spiebaan-bodemdiameter op regel " & (i + 1), "Rotoras Generator 2.3.2")
+            Return
+        End If
+    End If
+
+    ' Als één spiebaanwaarde is ingevuld, moeten ze alle vier geldig zijn.
+    If sbBegin <> 0 Or sbLengte <> 0 Or sbBreedte <> 0 Or sbDiepte <> 0 Then
+        If sbBegin < 0 Or sbLengte <= 0 Or sbBreedte <= 0 Or sbDiepte <= 0 Then
+            MessageBox.Show( _
+                "Spiebaan is niet volledig/geldig ingevuld op regel " & (i + 1) & vbCrLf & _
+                "Vul SpieBegin, SpieLengte, SpieBreedte en SpieDiepte in.", _
+                "Rotoras Generator 2.3.2")
+            Return
+        End If
+    End If
+
+
+    ' Afschuininginvoer: maat/hoek voor buitenrand, linker en rechter uiteinde.
+    If velden.Length <> afKolomAantal Then
+        MessageBox.Show("Onjuist aantal CSV-kolommen op regel " & (i + 1), "Rotoras Generator 2.3.2")
+        Return
+    End If
+    Dim afWaarden(5) As Double
+    If afKolomAantal = 18 Then
+        For afJ As Integer = 0 To 5
+            Dim afTekst As String = velden(12 + afJ).Trim().Replace(",", ".")
+            If afTekst <> "" Then
+                If Not Double.TryParse(afTekst, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, afWaarden(afJ)) OrElse Double.IsNaN(afWaarden(afJ)) OrElse Double.IsInfinity(afWaarden(afJ)) Then
+                    MessageBox.Show("Ongeldige afschuiningwaarde op CSV-regel " & (i + 1), "Rotoras Generator 2.3.2")
+                    Return
+                End If
+            End If
+        Next
+        For afJ As Integer = 0 To 4 Step 2
+            If afWaarden(afJ) < 0 Then
+                MessageBox.Show("Afschuiningmaat moet 0 of groter zijn.", "Rotoras Generator 2.3.2")
+                Return
+            End If
+            If afWaarden(afJ) > 0 Then
+                If velden(13 + afJ).Trim() = "" Then afWaarden(afJ + 1) = 45
+                If afWaarden(afJ + 1) <= 0 OrElse afWaarden(afJ + 1) >= 90 Then
+                    MessageBox.Show("Afschuininghoek moet tussen 0 en 90 graden liggen.", "Rotoras Generator 2.3.2")
+                    Return
+                End If
+            End If
+        Next
+        If (afWaarden(2) <> 0 OrElse afWaarden(3) <> 0) AndAlso diameters.Count <> 0 Then
+            MessageBox.Show("EindLinks mag alleen op de eerste sectieregel staan.", "Rotoras Generator 2.3.2")
+            Return
+        End If
+    End If
+    afData.Add(afWaarden)
+
+    diameters.Add(d)
+    passingen.Add(passingTekst)
+    lengtes.Add(L)
+    overgangen.Add(overgangTekst)
+    radii.Add(r)
+    dieptes.Add(t)
+    breedtes.Add(b)
+    spieBegin.Add(sbBegin)
+    spieLengte.Add(sbLengte)
+    spieBreedte.Add(sbBreedte)
+    spieDiepte.Add(sbDiepte)
+
+
+Next
+
+
+
+If diameters.Count = 0 Then
+
+    MessageBox.Show( _
+        "Geen geldige secties gevonden.", _
+        "Rotoras Generator 2.3.2")
+
+    Return
+
+End If
+
+
+
+If overgangen.Count > 0 Then
+    Dim laatsteOvergang76 As String = overgangen(overgangen.Count - 1).Trim().ToLower()
+    If laatsteOvergang76 = "din76-1 b" Or laatsteOvergang76 = "din76b" Then
+        MessageBox.Show("DIN76-1 B op de laatste sectie heeft geen rechter borst. Voeg een volgende sectie toe.", "Rotoras Generator 2.3.2")
+        Return
+    End If
+End If
+
+For afI As Integer = 0 To afData.Count - 1
+    If afI <> afData.Count - 1 AndAlso (afData(afI)(4) <> 0 OrElse afData(afI)(5) <> 0) Then
+        MessageBox.Show("EindRechts mag alleen op de laatste sectieregel staan.", "Rotoras Generator 2.3.2")
+        Return
+    End If
+    If afI = afData.Count - 1 AndAlso afData(afI)(0) > 0 Then
+        MessageBox.Show("BuitenMaat op de laatste sectie heeft geen diameterstap. Gebruik EindRechtsMaat.", "Rotoras Generator 2.3.2")
+        Return
+    End If
+Next
+
+' ============================================================
+' 4. CONTROLEREN OF PART LEEG IS
+' ============================================================
+
+If oDef.SurfaceBodies.Count > 0 Then
+
+    MessageBox.Show( _
+        "Gebruik een leeg Part." & _
+        vbCrLf & _
+        "Er staat al geometrie in dit bestand.", _
+        "Rotoras Generator 2.3.2")
+
+    Return
+
+End If
+
+
+
+' ============================================================
+' 5. BASIS-AS OPBOUWEN
+' ============================================================
+
+Dim oExtrudes As ExtrudeFeatures
+oExtrudes = oDef.Features.ExtrudeFeatures
+
+
+
+' ============================================================
+' 5A. EERSTE CILINDER
+' ============================================================
+
+Dim oSketch As PlanarSketch
+
+oSketch = _
+    oDef.Sketches.Add( _
+        oDef.WorkPlanes.Item(1))
+
+
+oSketch.Name = "Sectie_1"
+
+
+
+Dim radiusCM As Double
+radiusCM = diameters(0) / 20.0
+
+
+
+Dim oCircle As SketchCircle
+
+oCircle = _
+    oSketch.SketchCircles.AddByCenterRadius( _
+        tg.CreatePoint2d(0, 0), _
+        radiusCM)
+
+
+
+Dim oProfile As Profile
+oProfile = oSketch.Profiles.AddForSolid()
+
+
+
+Dim oExtDef As ExtrudeDefinition
+
+oExtDef = _
+    oExtrudes.CreateExtrudeDefinition( _
+        oProfile, _
+        PartFeatureOperationEnum.kNewBodyOperation)
+
+
+
+oExtDef.SetDistanceExtent( _
+    lengtes(0).ToString( _
+        System.Globalization.CultureInfo.InvariantCulture) & _
+    " mm", _
+    PartFeatureExtentDirectionEnum.kPositiveExtentDirection)
+
+
+
+Dim laatsteExtrude As ExtrudeFeature
+laatsteExtrude = oExtrudes.Add(oExtDef)
+
+laatsteExtrude.Name = "Asvlak_1"
+
+
+
+' ============================================================
+' 5B. OVERIGE CILINDERS
+' ============================================================
+
+For i As Integer = 1 To diameters.Count - 1
+
+
+    Dim eindVlak As Face
+    eindVlak = laatsteExtrude.EndFaces.Item(1)
+
+
+    Dim nieuweSketch As PlanarSketch
+    nieuweSketch = oDef.Sketches.Add(eindVlak)
+
+
+    nieuweSketch.Name = _
+        "Sectie_" & (i + 1)
+
+
+    radiusCM = diameters(i) / 20.0
+
+
+    Dim nieuweCirkel As SketchCircle
+
+    nieuweCirkel = _
+        nieuweSketch.SketchCircles.AddByCenterRadius( _
+            tg.CreatePoint2d(0, 0), _
+            radiusCM)
+
+
+    Dim nieuwProfiel As Profile
+    nieuwProfiel = nieuweSketch.Profiles.AddForSolid()
+
+
+    Dim nieuweExtDef As ExtrudeDefinition
+
+    nieuweExtDef = _
+        oExtrudes.CreateExtrudeDefinition( _
+            nieuwProfiel, _
+            PartFeatureOperationEnum.kJoinOperation)
+
+
+    nieuweExtDef.SetDistanceExtent( _
+        lengtes(i).ToString( _
+            System.Globalization.CultureInfo.InvariantCulture) & _
+        " mm", _
+        PartFeatureExtentDirectionEnum.kPositiveExtentDirection)
+
+
+    Dim nieuweExtrude As ExtrudeFeature
+    nieuweExtrude = oExtrudes.Add(nieuweExtDef)
+
+
+    nieuweExtrude.Name = _
+        "Asvlak_" & (i + 1)
+
+
+    laatsteExtrude = nieuweExtrude
+
+
+Next
+
+
+oDoc.Update()
+
+
+
+' ============================================================
+' 6. OVERGANGEN
+' ============================================================
+
+Dim cumulatieveLengteMM As Double
+cumulatieveLengteMM = 0
+
+
+
+For i As Integer = 0 To diameters.Count - 2
+
+
+    cumulatieveLengteMM += lengtes(i)
+
+
+    Dim overgang As String
+    overgang = overgangen(i).Trim().ToLower()
+
+
+    If overgang = "" Then
+        Continue For
+    End If
+
+
+
+    ' ========================================================
+    ' 6A. NORMALE RADIUS / CHAMFER
+    ' ========================================================
+
+    If overgang = "radius" Or _
+       overgang = "r" Or _
+       overgang = "chamfer" Or _
+       overgang = "afschuining" Or _
+       overgang = "c" Then
+
+
+        Dim waardeMM As Double
+        waardeMM = radii(i)
+
+
+        If waardeMM <= 0 Then
+
+            MessageBox.Show( _
+                "Geen geldige radius/chamferwaarde." & _
+                vbCrLf & _
+                "Na sectie: " & (i + 1), _
+                "Rotoras Generator 2.3.2")
+
+            Return
+
+        End If
+
+
+
+        Dim zoekX As Double
+        zoekX = cumulatieveLengteMM / 10.0
+
+
+        Dim kleineDiameter As Double
+
+        kleineDiameter = _
+            Math.Min( _
+                diameters(i), _
+                diameters(i + 1))
+
+
+        Dim zoekRadius As Double
+        zoekRadius = kleineDiameter / 20.0
+
+
+        Dim gevondenEdge As Edge
+        gevondenEdge = Nothing
+
+
+
+        For Each body As SurfaceBody In oDef.SurfaceBodies
+
+            For Each ed As Edge In body.Edges
+
+                Try
+
+                    If ed.GeometryType = _
+                        CurveTypeEnum.kCircleCurve Then
+
+
+                        Dim cirkel As Inventor.Circle
+                        cirkel = ed.Geometry
+
+
+                        Dim dx As Double
+                        dx = Math.Abs( _
+                            cirkel.Center.X - zoekX)
+
+
+                        Dim dr As Double
+                        dr = Math.Abs( _
+                            cirkel.Radius - zoekRadius)
+
+
+                        If dx < 0.001 And _
+                           dr < 0.001 Then
+
+                            gevondenEdge = ed
+                            Exit For
+
+                        End If
+
+                    End If
+
+                Catch
+                End Try
+
+            Next
+
+
+            If Not gevondenEdge Is Nothing Then
+                Exit For
+            End If
+
+        Next
+
+
+
+        If gevondenEdge Is Nothing Then
+
+            MessageBox.Show( _
+                "Geen geschikte schouderrand gevonden." & _
+                vbCrLf & _
+                "Na sectie: " & (i + 1), _
+                "Rotoras Generator 2.3.2")
+
+            Return
+
+        End If
+
+
+
+        Dim edgeSet As EdgeCollection
+
+        edgeSet = _
+            ThisApplication.TransientObjects.CreateEdgeCollection
+
+
+        edgeSet.Add(gevondenEdge)
+
+
+
+        ' ----------------------------------------------------
+        ' RADIUS
+        ' ----------------------------------------------------
+
+        If overgang = "radius" Or _
+           overgang = "r" Then
+
+
+            Try
+
+                Dim filletFeature As FilletFeature
+
+                filletFeature = _
+                    oDef.Features.FilletFeatures.AddSimple( _
+                        edgeSet, _
+                        waardeMM.ToString( _
+                            System.Globalization.CultureInfo.InvariantCulture) & _
+                        " mm")
+
+
+                filletFeature.Name = _
+                    "Radius_na_sectie_" & (i + 1)
+
+
+            Catch ex As Exception
+
+                MessageBox.Show( _
+                    "Radius kon niet worden gemaakt." & _
+                    vbCrLf & vbCrLf & _
+                    "Na sectie: " & (i + 1) & vbCrLf & _
+                    "R = " & waardeMM & " mm" & _
+                    vbCrLf & vbCrLf & _
+                    ex.Message, _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End Try
+
+
+
+        ' ----------------------------------------------------
+        ' CHAMFER
+        ' ----------------------------------------------------
+
+        Else
+
+
+            Try
+
+                Dim chamferFeature As ChamferFeature
+
+                chamferFeature = _
+                    oDef.Features.ChamferFeatures.AddUsingDistance( _
+                        edgeSet, _
+                        waardeMM.ToString( _
+                            System.Globalization.CultureInfo.InvariantCulture) & _
+                        " mm")
+
+
+                chamferFeature.Name = _
+                    "Chamfer_na_sectie_" & (i + 1)
+
+
+            Catch ex As Exception
+
+                MessageBox.Show( _
+                    "Chamfer kon niet worden gemaakt." & _
+                    vbCrLf & vbCrLf & _
+                    "Na sectie: " & (i + 1) & vbCrLf & _
+                    "Afstand = " & waardeMM & " mm" & _
+                    vbCrLf & vbCrLf & _
+                    ex.Message, _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End Try
+
+        End If
+
+
+        oDoc.Update()
+
+
+
+    ' ========================================================
+    ' 6B. DIN509E v2.1
+    ' ========================================================
+
+    ElseIf overgang = "din509e" Or _
+           overgang = "din509-e" Then
+
+
+        ' ----------------------------------------------------
+        ' CSV-WAARDEN
+        ' ----------------------------------------------------
+
+        Dim rMM As Double
+        Dim tMM As Double
+        Dim fMM As Double
+
+        rMM = radii(i)
+        tMM = dieptes(i)
+        fMM = breedtes(i)
+
+
+        If rMM <= 0 Or _
+           tMM <= 0 Or _
+           fMM <= 0 Then
+
+            MessageBox.Show( _
+                "DIN509E mist Radius, Diepte of Breedte." & _
+                vbCrLf & vbCrLf & _
+                "Na sectie: " & (i + 1) & vbCrLf & _
+                "R = " & rMM & " mm" & vbCrLf & _
+                "t = " & tMM & " mm" & vbCrLf & _
+                "f = " & fMM & " mm", _
+                "Rotoras Generator 2.3.2")
+
+            Return
+
+        End If
+
+
+
+        ' ----------------------------------------------------
+        ' DIAMETERS
+        ' ----------------------------------------------------
+
+        Dim kleineD As Double
+
+        kleineD = _
+            Math.Min( _
+                diameters(i), _
+                diameters(i + 1))
+
+
+        Dim groteD As Double
+
+        groteD = _
+            Math.Max( _
+                diameters(i), _
+                diameters(i + 1))
+
+
+        Dim kleineRMM As Double
+        kleineRMM = kleineD / 2.0
+
+
+        Dim groteRMM As Double
+        groteRMM = groteD / 2.0
+
+
+        Dim bodemRMM As Double
+        bodemRMM = kleineRMM - tMM
+
+
+        
+Dim radiusEindRMM As Double
+radiusEindRMM = bodemRMM + rMM
+
+
+If bodemRMM <= 0 Then
+
+    MessageBox.Show( _
+        "DIN509E diepte is ongeldig.", _
+        "Rotoras Generator 2.3.2")
+
+    Return
+
+End If
+
+
+' ----------------------------------------------------
+' CONTROLEREN OF RADIUS BINNEN DE BORST PAST
+'
+' Indien de opgegeven DIN509E-radius te groot is,
+' automatisch de eerstvolgende kleinere standaardradius
+' proberen.
+'
+' Toegestane radiussen:
+' 0,4 / 0,8 / 1 / 1,5 / 1,6 / 2 / 2,5 /
+' 3 / 3,5 / 4 / 5 / 6 / 7 / 8
+' ----------------------------------------------------
+
+If radiusEindRMM >= groteRMM Then
+
+    Dim oorspronkelijkeRMM As Double
+    oorspronkelijkeRMM = rMM
+
+    Dim standaardRadii() As Double = _
+        {8.0, 7.0, 6.0, 5.0, 4.0, 3.5, 3.0, _
+         2.5, 2.0, 1.6, 1.5, 1.0, 0.8, 0.4}
+
+    Dim nieuweRMM As Double
+    nieuweRMM = 0
+
+    ' Zoek vanaf de opgegeven radius naar beneden
+    For Each testR As Double In standaardRadii
+
+        If testR < oorspronkelijkeRMM Then
+
+            Dim testRadiusEindRMM As Double
+            testRadiusEindRMM = bodemRMM + testR
+
+            If testRadiusEindRMM < groteRMM Then
+                nieuweRMM = testR
+                Exit For
+            End If
+
+        End If
+
+    Next
+
+
+    ' Geen enkele standaardradius past
+    If nieuweRMM <= 0 Then
+
+        MessageBox.Show( _
+            "DIN509E radius past niet binnen de borst." & _
+            vbCrLf & vbCrLf & _
+            "Kleine diameter = Ø" & kleineD & " mm" & vbCrLf & _
+            "Grote diameter = Ø" & groteD & " mm" & vbCrLf & _
+            "Opgegeven R = " & oorspronkelijkeRMM & " mm" & vbCrLf & _
+            "t = " & tMM & " mm" & vbCrLf & vbCrLf & _
+            "Ook de kleinste standaardradius R0,4 past niet.", _
+            "Rotoras Generator 2.3.2")
+
+        Return
+
+    End If
+
+
+    ' Nieuwe radius daadwerkelijk gebruiken
+    rMM = nieuweRMM
+
+    ' BELANGRIJK:
+    ' ook lijst bijwerken voor DIN509E_Tabel / DWG
+    radii(i) = nieuweRMM
+
+    ' Nieuwe eindradius opnieuw berekenen
+    radiusEindRMM = bodemRMM + rMM
+
+
+    MessageBox.Show( _
+        "DIN509E radius R" & oorspronkelijkeRMM & _
+        " past niet binnen de borst." & _
+        vbCrLf & vbCrLf & _
+        "Kleine diameter = Ø" & kleineD & " mm" & vbCrLf & _
+        "Grote diameter = Ø" & groteD & " mm" & vbCrLf & _
+        "t = " & tMM & " mm" & vbCrLf & vbCrLf & _
+        "Radius automatisch aangepast:" & vbCrLf & _
+        "R" & oorspronkelijkeRMM & "  ->  R" & nieuweRMM & vbCrLf & vbCrLf & _
+        "De ondersnijding wordt uitgevoerd met R" & nieuweRMM & ".", _
+        "Rotoras Generator 2.3.2", _
+        MessageBoxButtons.OK, _
+        MessageBoxIcon.Warning)
+
+End If
+
+
+        ' ----------------------------------------------------
+        ' KLEINE DIAMETER LINKS / RECHTS
+        ' ----------------------------------------------------
+
+        Dim kleineDiameterLinks As Boolean
+
+        kleineDiameterLinks = _
+            (diameters(i) < diameters(i + 1))
+
+
+
+        ' ----------------------------------------------------
+        ' 15° GEOMETRIE
+        ' ----------------------------------------------------
+
+        Dim hoekRad As Double
+        hoekRad = 15.0 * Math.PI / 180.0
+
+
+        Dim lengte15MM As Double
+
+        lengte15MM = _
+            tMM / Math.Tan(hoekRad)
+
+
+
+        ' ----------------------------------------------------
+        ' RECHTE BODEMLENGTE
+        ' ----------------------------------------------------
+
+        Dim bodemLengteMM As Double
+
+        bodemLengteMM = _
+            fMM - lengte15MM - rMM
+
+
+        If bodemLengteMM < -0.0001 Then
+
+            MessageBox.Show( _
+                "DIN509E past niet binnen breedte f." & _
+                vbCrLf & vbCrLf & _
+                "f = " & fMM & " mm" & vbCrLf & _
+                "t = " & tMM & " mm" & vbCrLf & _
+                "R = " & rMM & " mm" & vbCrLf & vbCrLf & _
+                "15° gebruikt = " & _
+                Math.Round(lengte15MM, 3) & " mm" & vbCrLf & _
+                "Radius gebruikt = " & _
+                Math.Round(rMM, 3) & " mm" & vbCrLf & _
+                "Minimale f = " & _
+                Math.Round(lengte15MM + rMM, 3) & " mm", _
+                "Rotoras Generator 2.3.2")
+
+            Return
+
+        End If
+
+
+        If bodemLengteMM < 0 Then
+            bodemLengteMM = 0
+        End If
+
+
+
+        ' ----------------------------------------------------
+        ' OMZETTEN NAAR CM
+        ' ----------------------------------------------------
+
+        Dim schouderX As Double
+        schouderX = cumulatieveLengteMM / 10.0
+
+
+        Dim nominaleR As Double
+        nominaleR = kleineRMM / 10.0
+
+
+        Dim bodemR As Double
+        bodemR = bodemRMM / 10.0
+
+
+        Dim groteR As Double
+        groteR = groteRMM / 10.0
+
+
+        Dim radiusEindR As Double
+        radiusEindR = radiusEindRMM / 10.0
+
+
+        Dim fCM As Double
+        fCM = fMM / 10.0
+
+
+        Dim lengte15CM As Double
+        lengte15CM = lengte15MM / 10.0
+
+
+        Dim rCM As Double
+        rCM = rMM / 10.0
+
+
+
+        ' ====================================================
+        ' 6B-1. ONTBREKEND MATERIAAL TOEVOEGEN
+        ' ====================================================
+        '
+        ' Alleen nodig wanneer:
+        '
+        ' bodemR + R > nominale kleine radius
+        '
+        ' Voorbeeld:
+        '
+        ' Ø40:
+        ' nominaleR = 20.0
+        '
+        ' t0.2:
+        ' bodem = 19.8
+        '
+        ' R1:
+        ' einde radius = 20.8
+        '
+        ' Dus 0.8 mm materiaal ontbreekt.
+        '
+        ' We voegen een klein rechthoekig ringgebied toe.
+        '
+        ' Daarna snijdt de DIN509E CUT dit rechthoekje
+        ' exact terug naar de gewenste radius.
+        '
+        ' ====================================================
+
+
+        If radiusEindR > nominaleR Then
+
+
+            Dim joinSketch As PlanarSketch
+
+            joinSketch = _
+                oDef.Sketches.Add( _
+                    oDef.WorkPlanes.Item(3))
+
+
+            joinSketch.Name = _
+                "DIN509E_Materiaal_v21_na_" & (i + 1)
+
+
+
+            ' ------------------------------------------------
+            ' Kleine overlap
+            '
+            ' 0.01 mm radiaal
+            '
+            ' Hierdoor overlapt de JOIN echt met de bestaande
+            ' kleine cilinder en is het geen losse body.
+            ' ------------------------------------------------
+
+            Dim overlapMM As Double
+            overlapMM = 0.01
+
+
+            Dim overlapCM As Double
+            overlapCM = overlapMM / 10.0
+
+
+            Dim joinOnderR As Double
+
+            joinOnderR = _
+                nominaleR - overlapCM
+
+
+            Dim joinBovenR As Double
+
+            joinBovenR = _
+                radiusEindR
+
+
+
+            ' ------------------------------------------------
+            ' Ook axiaal 0.01 mm overlap in de grote diameter.
+            '
+            ' Dat gedeelte zit al in bestaand materiaal en
+            ' verandert de uiteindelijke geometrie niet.
+            ' ------------------------------------------------
+
+            Dim joinX1 As Double
+            Dim joinX2 As Double
+
+
+            If kleineDiameterLinks Then
+
+                joinX1 = schouderX - rCM
+                joinX2 = schouderX + overlapCM
+
+            Else
+
+                joinX1 = schouderX - overlapCM
+                joinX2 = schouderX + rCM
+
+            End If
+
+
+
+            ' ------------------------------------------------
+            ' RECHTHOEKIG JOIN-PROFIEL
+            ' ------------------------------------------------
+
+            Dim joinRect As SketchEntitiesEnumerator
+
+            joinRect = _
+                joinSketch.SketchLines.AddAsTwoPointRectangle( _
+                    tg.CreatePoint2d( _
+                        joinX1, _
+                        joinOnderR), _
+                    tg.CreatePoint2d( _
+                        joinX2, _
+                        joinBovenR))
+
+
+
+            joinSketch.UpdateProfiles()
+
+
+
+            Dim joinProfile As Profile
+
+
+            Try
+
+                joinProfile = _
+                    joinSketch.Profiles.AddForSolid()
+
+            Catch ex As Exception
+
+                MessageBox.Show( _
+                    "DIN509E v2.1:" & vbCrLf & _
+                    "profiel voor extra materiaal kon niet worden gemaakt." & _
+                    vbCrLf & vbCrLf & _
+                    ex.Message, _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End Try
+
+
+
+            ' ------------------------------------------------
+            ' ROTATIE-AS VOOR JOIN
+            ' ------------------------------------------------
+
+            Dim joinAxis As SketchLine
+
+            joinAxis = _
+                joinSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d( _
+                        schouderX - 1.0, _
+                        0), _
+                    tg.CreatePoint2d( _
+                        schouderX + 1.0, _
+                        0))
+
+
+            joinAxis.Construction = True
+
+
+
+            ' ------------------------------------------------
+            ' REVOLVE JOIN
+            ' ------------------------------------------------
+
+            Try
+
+                Dim joinRevolve As RevolveFeature
+
+
+                joinRevolve = _
+                    oDef.Features.RevolveFeatures.AddFull( _
+                        joinProfile, _
+                        joinAxis, _
+                        PartFeatureOperationEnum.kJoinOperation)
+
+
+                joinRevolve.Name = _
+                    "DIN509E_EXTRA_MATERIAAL_v21_na_" & _
+                    (i + 1)
+
+
+            Catch ex As Exception
+
+                MessageBox.Show( _
+                    "DIN509E v2.1:" & vbCrLf & _
+                    "extra materiaal kon niet worden toegevoegd." & _
+                    vbCrLf & vbCrLf & _
+                    "Na sectie: " & (i + 1) & vbCrLf & _
+                    "Ontbrekende hoogte: " & _
+                    Math.Round( _
+                        radiusEindRMM - kleineRMM, _
+                        3) & " mm" & _
+                    vbCrLf & vbCrLf & _
+                    ex.Message, _
+                    "Rotoras Generator 2.3.2")
+
+                Return
+
+            End Try
+
+
+            oDoc.Update()
+
+
+        End If
+
+
+
+        ' ====================================================
+        ' 6B-2. DIN509E CUT-PROFIEL
+        ' ====================================================
+
+        Dim grooveSketch As PlanarSketch
+
+        grooveSketch = _
+            oDef.Sketches.Add( _
+                oDef.WorkPlanes.Item(3))
+
+
+        grooveSketch.Name = _
+            "DIN509E_CUT_v21_na_" & (i + 1)
+
+
+
+        ' ====================================================
+        ' KLEINE DIAMETER LINKS
+        ' ====================================================
+
+        If kleineDiameterLinks Then
+
+
+            ' ------------------------------------------------
+            ' P1 = BEGIN 15°
+            ' ------------------------------------------------
+
+            Dim p1 As Point2d
+
+            p1 = _
+                tg.CreatePoint2d( _
+                    schouderX - fCM, _
+                    nominaleR)
+
+
+
+            ' ------------------------------------------------
+            ' P2 = EINDE 15°
+            ' ------------------------------------------------
+
+            Dim p2 As Point2d
+
+            p2 = _
+                tg.CreatePoint2d( _
+                    schouderX - fCM + lengte15CM, _
+                    bodemR)
+
+
+
+            ' ------------------------------------------------
+            ' 15° LIJN
+            ' ------------------------------------------------
+
+            Dim lijn15 As SketchLine
+
+            lijn15 = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    p1, _
+                    p2)
+
+
+
+            ' ------------------------------------------------
+            ' P3 = BEGIN RADIUS
+            ' ------------------------------------------------
+
+            Dim p3 As Point2d
+
+            p3 = _
+                tg.CreatePoint2d( _
+                    schouderX - rCM, _
+                    bodemR)
+
+
+
+            ' ------------------------------------------------
+            ' RECHTE BODEM
+            ' ------------------------------------------------
+
+            Dim bodemLijn As SketchLine
+
+            bodemLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    lijn15.EndSketchPoint, _
+                    p3)
+
+
+
+            ' ------------------------------------------------
+            ' EXACTE RADIUS
+            '
+            ' Centrum:
+            '
+            ' X = borst - R
+            ' Y = bodem + R
+            '
+            ' Start = -90°
+            ' Sweep = +90°
+            '
+            ' bodem --------╮
+            '               )
+            '               │ borst
+            '
+            ' ------------------------------------------------
+
+            Dim arcCenter As Point2d
+
+            arcCenter = _
+                tg.CreatePoint2d( _
+                    schouderX - rCM, _
+                    bodemR + rCM)
+
+
+
+            Dim radiusArc As SketchArc
+
+            radiusArc = _
+                grooveSketch.SketchArcs. _
+                AddByCenterStartSweepAngle( _
+                    arcCenter, _
+                    rCM, _
+                    -Math.PI / 2.0, _
+                    Math.PI / 2.0)
+
+
+
+            ' ------------------------------------------------
+            ' BODEM EN RADIUS EXPLICIET VERBINDEN
+            ' ------------------------------------------------
+
+            Try
+
+                radiusArc.StartSketchPoint.Merge( _
+                    bodemLijn.EndSketchPoint)
+
+            Catch
+            End Try
+
+
+
+            ' ------------------------------------------------
+            ' BORSTLIJN
+            '
+            ' Vanaf einde radius exact verticaal naar
+            ' grote diameter.
+            ' ------------------------------------------------
+
+            Dim borstLijn As SketchLine
+
+            borstLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    radiusArc.EndSketchPoint, _
+                    tg.CreatePoint2d( _
+                        schouderX, _
+                        groteR))
+
+
+
+            ' ------------------------------------------------
+            ' BOVENLIJN
+            ' ------------------------------------------------
+
+            Dim bovenLijn As SketchLine
+
+            bovenLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    borstLijn.EndSketchPoint, _
+                    tg.CreatePoint2d( _
+                        schouderX - fCM, _
+                        groteR))
+
+
+
+            ' ------------------------------------------------
+            ' SLUITLIJN
+            ' ------------------------------------------------
+
+            Dim sluitLijn As SketchLine
+
+            sluitLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    bovenLijn.EndSketchPoint, _
+                    lijn15.StartSketchPoint)
+
+
+
+        ' ====================================================
+        ' KLEINE DIAMETER RECHTS
+        ' ====================================================
+
+        Else
+
+
+            ' ------------------------------------------------
+            ' P1 = BEGIN 15°
+            ' ------------------------------------------------
+
+            Dim p1 As Point2d
+
+            p1 = _
+                tg.CreatePoint2d( _
+                    schouderX + fCM, _
+                    nominaleR)
+
+
+
+            ' ------------------------------------------------
+            ' P2 = EINDE 15°
+            ' ------------------------------------------------
+
+            Dim p2 As Point2d
+
+            p2 = _
+                tg.CreatePoint2d( _
+                    schouderX + fCM - lengte15CM, _
+                    bodemR)
+
+
+
+            ' ------------------------------------------------
+            ' 15° LIJN
+            ' ------------------------------------------------
+
+            Dim lijn15 As SketchLine
+
+            lijn15 = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    p1, _
+                    p2)
+
+
+
+            ' ------------------------------------------------
+            ' P3 = BEGIN RADIUS
+            ' ------------------------------------------------
+
+            Dim p3 As Point2d
+
+            p3 = _
+                tg.CreatePoint2d( _
+                    schouderX + rCM, _
+                    bodemR)
+
+
+
+            ' ------------------------------------------------
+            ' BODEM
+            ' ------------------------------------------------
+
+            Dim bodemLijn As SketchLine
+
+            bodemLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    lijn15.EndSketchPoint, _
+                    p3)
+
+
+
+            ' ------------------------------------------------
+            ' GESPIEGELDE RADIUS
+            ' ------------------------------------------------
+
+            Dim arcCenter As Point2d
+
+            arcCenter = _
+                tg.CreatePoint2d( _
+                    schouderX + rCM, _
+                    bodemR + rCM)
+
+
+
+            ' ------------------------------------------------
+            ' Voor de rechtervariant:
+            '
+            ' borst
+            ' │
+            ' (
+            ' ╰-------- bodem
+            '
+            ' We maken de boog van borst naar bodem.
+            ' ------------------------------------------------
+
+            Dim radiusArc As SketchArc
+
+            radiusArc = _
+                grooveSketch.SketchArcs. _
+                AddByCenterStartSweepAngle( _
+                    arcCenter, _
+                    rCM, _
+                    Math.PI, _
+                    Math.PI / 2.0)
+
+
+
+            ' ------------------------------------------------
+            ' BODEM AAN ARC VERBINDEN
+            ' ------------------------------------------------
+
+            Try
+
+                radiusArc.EndSketchPoint.Merge( _
+                    bodemLijn.EndSketchPoint)
+
+            Catch
+            End Try
+
+
+
+            ' ------------------------------------------------
+            ' BORST
+            ' ------------------------------------------------
+
+            Dim borstLijn As SketchLine
+
+            borstLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    radiusArc.StartSketchPoint, _
+                    tg.CreatePoint2d( _
+                        schouderX, _
+                        groteR))
+
+
+
+            ' ------------------------------------------------
+            ' BOVENLIJN
+            ' ------------------------------------------------
+
+            Dim bovenLijn As SketchLine
+
+            bovenLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    borstLijn.EndSketchPoint, _
+                    tg.CreatePoint2d( _
+                        schouderX + fCM, _
+                        groteR))
+
+
+
+            ' ------------------------------------------------
+            ' SLUITEN
+            ' ------------------------------------------------
+
+            Dim sluitLijn As SketchLine
+
+            sluitLijn = _
+                grooveSketch.SketchLines.AddByTwoPoints( _
+                    bovenLijn.EndSketchPoint, _
+                    lijn15.StartSketchPoint)
+
+
+        End If
+
+
+
+        ' ====================================================
+        ' PROFIEL BIJWERKEN
+        ' ====================================================
+
+        grooveSketch.UpdateProfiles()
+
+
+
+        ' ====================================================
+        ' CUT-PROFIEL
+        ' ====================================================
+
+        Dim grooveProfile As Profile
+
+
+        Try
+
+            grooveProfile = _
+                grooveSketch.Profiles.AddForSolid()
+
+        Catch ex As Exception
+
+            MessageBox.Show( _
+                "DIN509E profiel kon niet worden gemaakt." & _
+                vbCrLf & vbCrLf & _
+                "Na sectie: " & (i + 1) & vbCrLf & _
+                "R = " & rMM & " mm" & vbCrLf & _
+                "t = " & tMM & " mm" & vbCrLf & _
+                "f = " & fMM & " mm" & vbCrLf & _
+                "15° lengte = " & _
+                Math.Round(lengte15MM, 3) & " mm" & vbCrLf & _
+                "Bodemlengte = " & _
+                Math.Round(bodemLengteMM, 3) & " mm" & _
+                vbCrLf & vbCrLf & _
+                ex.Message, _
+                "Rotoras Generator 2.3.2")
+
+            Return
+
+        End Try
+
+
+
+        ' ====================================================
+        ' ROTATIE-AS
+        ' ====================================================
+
+        Dim axisLine As SketchLine
+
+        axisLine = _
+            grooveSketch.SketchLines.AddByTwoPoints( _
+                tg.CreatePoint2d( _
+                    schouderX - 1.0, _
+                    0), _
+                tg.CreatePoint2d( _
+                    schouderX + 1.0, _
+                    0))
+
+
+        axisLine.Construction = True
+
+
+
+        ' ====================================================
+        ' REVOLVE CUT
+        ' ====================================================
+
+        Try
+
+            Dim grooveRevolve As RevolveFeature
+
+
+            grooveRevolve = _
+                oDef.Features.RevolveFeatures.AddFull( _
+                    grooveProfile, _
+                    axisLine, _
+                    PartFeatureOperationEnum.kCutOperation)
+
+
+            grooveRevolve.Name = _
+                "DIN509E_v21_R" & _
+                rMM.ToString( _
+                    System.Globalization.CultureInfo.InvariantCulture) & _
+                "_t" & _
+                tMM.ToString( _
+                    System.Globalization.CultureInfo.InvariantCulture) & _
+                "_f" & _
+                fMM.ToString( _
+                    System.Globalization.CultureInfo.InvariantCulture) & _
+                "_na_" & (i + 1)
+
+
+        Catch ex As Exception
+
+            MessageBox.Show( _
+                "DIN509E revolve-cut kon niet worden gemaakt." & _
+                vbCrLf & vbCrLf & _
+                "Na sectie: " & (i + 1) & vbCrLf & _
+                "R = " & rMM & " mm" & vbCrLf & _
+                "t = " & tMM & " mm" & vbCrLf & _
+                "f = " & fMM & " mm" & _
+                vbCrLf & vbCrLf & _
+                ex.Message, _
+                "Rotoras Generator 2.3.2")
+
+            Return
+
+        End Try
+
+
+        oDoc.Update()
+
+
+
+    ' ========================================================
+    ' 6C. DIN76-1 B — metrische grove buitendraad
+    ' De kleine diameter is de nominale draadmaat d.
+    ' Tabelwaarden: g1 minimum, g2 maximum, r en nominale dg (h13).
+    ' Alleen de ondersnijding wordt gemodelleerd, niet de draad.
+    ' ========================================================
+    ElseIf overgang = "din76-1 b" Or overgang = "din76b" Then
+
+        Dim draadD As Double = Math.Min(diameters(i), diameters(i + 1))
+        Dim draadMaten() As Double = {1, 1.2, 1.4, 1.6, 1.7, 1.8, 2, 2.2, 2.3, 2.5, 2.6, 3, 3.5, 4, 4.5, 5, 6, 7, 8, 10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 33, 36, 39, 42, 45, 48, 52, 56, 60, 64, 68}
+        Dim draadSpoeden() As Double = {0.25, 0.25, 0.3, 0.35, 0.35, 0.35, 0.4, 0.45, 0.4, 0.45, 0.45, 0.5, 0.6, 0.7, 0.75, 0.8, 1, 1, 1.25, 1.5, 1.75, 2, 2, 2.5, 2.5, 2.5, 3, 3, 3.5, 3.5, 4, 4, 4.5, 4.5, 5, 5, 5.5, 5.5, 6, 6}
+        Dim draadDelta() As Double = {0.4, 0.4, 0.5, 0.6, 0.6, 0.6, 0.7, 0.7, 0.7, 0.7, 0.7, 0.8, 1, 1.1, 1.2, 1.3, 1.6, 1.6, 2, 2.3, 2.6, 3, 3, 3.6, 3.6, 3.6, 4.4, 4.4, 5, 5, 5.7, 5.7, 6.4, 6.4, 7, 7, 7.7, 7.7, 8.3, 8.3}
+        Dim draadG1() As Double = {0.25, 0.25, 0.3, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.6, 0.8, 0.9, 0.9, 1.1, 1.1, 1.5, 1.8, 2.1, 2.5, 2.5, 3.2, 3.2, 3.2, 3.7, 3.7, 4.7, 4.7, 5, 5, 5.6, 5.6, 6.5, 6.5, 7.5, 7.5, 8, 8}
+        Dim draadG2() As Double = {0.6, 0.6, 0.75, 0.9, 0.9, 0.9, 1, 1.1, 1, 1.1, 1.1, 1.25, 1.5, 1.75, 1.9, 2, 2.5, 2.5, 3.2, 3.8, 4.3, 5, 5, 6.3, 6.3, 6.3, 7.5, 7.5, 9, 9, 10, 10, 11, 11, 12.5, 12.5, 14, 14, 15, 15}
+        Dim draadRadii() As Double = {0.12, 0.12, 0.16, 0.16, 0.16, 0.16, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.4, 0.4, 0.4, 0.4, 0.6, 0.6, 0.6, 0.8, 1, 1, 1, 1.2, 1.2, 1.2, 1.6, 1.6, 1.6, 1.6, 2, 2, 2, 2, 2.5, 2.5, 3.2, 3.2, 3.2, 3.2}
+        Dim draadIndex As Integer = -1
+        For j As Integer = 0 To draadMaten.Length - 1
+            If Math.Abs(draadD - draadMaten(j)) < 0.000001 Then
+                draadIndex = j
+                Exit For
+            End If
+        Next
+        If draadIndex < 0 Or Math.Abs(diameters(i) - diameters(i + 1)) < 0.000001 Then
+            MessageBox.Show("DIN76-1 B vereist een borst en een standaard metrische draadmaat uit de tabel." & _
+                vbCrLf & "Na sectie: " & (i + 1) & vbCrLf & "Kleine diameter: " & draadD, _
+                "Rotoras Generator 2.3.2")
+            Return
+        End If
+
+        Dim p76 As Double = draadSpoeden(draadIndex)
+        Dim r76 As Double = draadRadii(draadIndex)
+        Dim t76 As Double = draadDelta(draadIndex) / 2.0
+        Dim g176 As Double = draadG1(draadIndex)
+        Dim g276 As Double = draadG2(draadIndex)
+        Dim dg76 As Double = draadD - draadDelta(draadIndex)
+        ' De afgeronde g1/g2-tabelwaarden passen niet altijd bij exact 30 graden.
+        ' Gebruik minimaal 30 graden; houd g1 >= minimum en g2 <= maximum.
+        Dim inloop76 As Double = Math.Min(g276 - g176, t76 / Math.Tan(Math.PI / 6.0))
+        Dim f76 As Double = g176 + inloop76
+        Dim links76 As Boolean = diameters(i) < diameters(i + 1)
+        Dim sectie76 As Integer = If(links76, i, i + 1)
+        If dg76 <= 0 Or g176 <= r76 Or f76 >= lengtes(sectie76) Then
+            MessageBox.Show("DIN76-1 B past niet binnen de draadsectie." & vbCrLf & _
+                "Na sectie: " & (i + 1) & vbCrLf & "Benodigde lengte: " & f76 & " mm", _
+                "Rotoras Generator 2.3.2")
+            Return
+        End If
+        ' Gebruik de normmaten, ook wanneer Radius leeg is in de bestaande CSV.
+        radii(i) = r76
+        dieptes(i) = t76
+        breedtes(i) = f76
+
+        Dim x76 As Double = cumulatieveLengteMM / 10.0
+        Dim bodem76 As Double = dg76 / 20.0
+        Dim nominal76 As Double = draadD / 20.0
+        Dim boven76 As Double = Math.Max(diameters(i), diameters(i + 1)) / 20.0
+        Dim rc76 As Double = r76 / 10.0
+        Dim teken76 As Double = If(links76, -1.0, 1.0)
+        Dim sk76 As PlanarSketch = oDef.Sketches.Add(oDef.WorkPlanes.Item(3))
+        sk76.Name = "DIN76B_CUT_na_" & (i + 1)
+        Dim start76 As Point2d = tg.CreatePoint2d(x76 + teken76 * f76 / 10.0, nominal76)
+        Dim slopeEnd76 As Point2d = tg.CreatePoint2d(x76 + teken76 * g176 / 10.0, bodem76)
+        Dim arcBottom76 As Point2d = tg.CreatePoint2d(x76 + teken76 * rc76, bodem76)
+        Dim lijn76 As SketchLine = sk76.SketchLines.AddByTwoPoints(start76, slopeEnd76)
+        Dim bodemLijn76 As SketchLine = sk76.SketchLines.AddByTwoPoints(lijn76.EndSketchPoint, arcBottom76)
+        Dim center76 As Point2d = tg.CreatePoint2d(x76 + teken76 * rc76, bodem76 + rc76)
+        Dim arc76 As SketchArc
+        Dim borstPunt76 As SketchPoint
+        If links76 Then
+            arc76 = sk76.SketchArcs.AddByCenterStartSweepAngle(center76, rc76, -Math.PI / 2.0, Math.PI / 2.0)
+            arc76.StartSketchPoint.Merge(bodemLijn76.EndSketchPoint)
+            borstPunt76 = arc76.EndSketchPoint
+        Else
+            arc76 = sk76.SketchArcs.AddByCenterStartSweepAngle(center76, rc76, Math.PI, Math.PI / 2.0)
+            arc76.EndSketchPoint.Merge(bodemLijn76.EndSketchPoint)
+            borstPunt76 = arc76.StartSketchPoint
+        End If
+        Dim borst76 As SketchLine = sk76.SketchLines.AddByTwoPoints(borstPunt76, tg.CreatePoint2d(x76, boven76))
+        Dim top76 As SketchLine = sk76.SketchLines.AddByTwoPoints(borst76.EndSketchPoint, _
+            tg.CreatePoint2d(x76 + teken76 * f76 / 10.0, boven76))
+        sk76.SketchLines.AddByTwoPoints(top76.EndSketchPoint, lijn76.StartSketchPoint)
+        sk76.UpdateProfiles()
+        Try
+            Dim profiel76 As Profile = sk76.Profiles.AddForSolid()
+            Dim as76 As SketchLine = sk76.SketchLines.AddByTwoPoints(tg.CreatePoint2d(x76 - 1, 0), tg.CreatePoint2d(x76 + 1, 0))
+            as76.Construction = True
+            Dim cut76 As RevolveFeature = oDef.Features.RevolveFeatures.AddFull(profiel76, as76, PartFeatureOperationEnum.kCutOperation)
+            cut76.Name = "DIN76B_M" & draadD.ToString(System.Globalization.CultureInfo.InvariantCulture) & _
+                "_P" & p76.ToString(System.Globalization.CultureInfo.InvariantCulture) & "_na_" & (i + 1)
+        Catch ex As Exception
+            MessageBox.Show("DIN76-1 B kon niet worden gemaakt." & vbCrLf & "Na sectie: " & (i + 1) & _
+                vbCrLf & ex.Message, "Rotoras Generator 2.3.2")
+            Return
+        End Try
+        oDoc.Update()
+
+    ' ========================================================
+    ' 6D. ONBEKEND OVERGANGSTYPE
+    ' ========================================================
+
+    Else
+
+
+        MessageBox.Show( _
+            "Onbekend overgangstype:" & _
+            vbCrLf & _
+            overgangen(i) & _
+            vbCrLf & vbCrLf & _
+            "Na sectie: " & (i + 1), _
+            "Rotoras Generator 2.3.2")
+
+
+        Return
+
+
+    End If
+
+
+Next
+
+
+
+
+ ' ============================================================
+' 6E. BUITENAFSCHUININGEN EN EINDAFSCHUININGEN
+' Los van de bestaande binnenrand/ondersnijding.
+' Werkwijze: driehoekig profiel met axiale maat en radiale
+' afname maat*tan(hoek), daarna een volledige REVOLVE CUT.
+' ============================================================
+Dim afActief As Boolean = False
+For Each afRij As Double() In afData
+    If afRij(0) > 0 OrElse afRij(2) > 0 OrElse afRij(4) > 0 Then afActief = True
+Next
+If afActief Then
+    Dim afLinksExtent(diameters.Count - 1) As Double
+    Dim afRechtsExtent(diameters.Count - 1) As Double
+    ' Taak: kopse X, buitenradius, axiale richting, maat, radiale afname.
+    Dim afTaken As New List(Of Double())
+    Dim afNamen As New List(Of String)
+    Dim afX As Double = 0
+    For afI As Integer = 0 To diameters.Count - 2
+        afX += lengtes(afI)
+        Dim afKleinLinks As Boolean = diameters(afI) < diameters(afI + 1)
+        Dim afKlein As Double = Math.Min(diameters(afI), diameters(afI + 1)) / 2.0
+        Dim afGroot As Double = Math.Max(diameters(afI), diameters(afI + 1)) / 2.0
+        Dim afBinnenEind As Double = afKlein
+        Dim afBinnenBreedte As Double = 0
+        Dim afOvergang As String = overgangen(afI).Trim().ToLowerInvariant()
+        If afOvergang = "radius" OrElse afOvergang = "r" OrElse afOvergang = "chamfer" OrElse afOvergang = "c" OrElse afOvergang = "afschuining" Then
+            afBinnenEind = afKlein + radii(afI)
+            afBinnenBreedte = radii(afI)
+        ElseIf afOvergang = "din509e" OrElse afOvergang = "din509-e" OrElse afOvergang = "din76-1 b" OrElse afOvergang = "din76b" Then
+            ' radii bevat hier de daadwerkelijk gebruikte DIN509-radius;
+            ' breedtes bevat hier de door Inventor berekende DIN76-breedte.
+            afBinnenEind = afKlein - dieptes(afI) + radii(afI)
+            afBinnenBreedte = breedtes(afI)
+        End If
+        If afKleinLinks Then
+            afRechtsExtent(afI) = afBinnenBreedte
+        Else
+            afLinksExtent(afI + 1) = afBinnenBreedte
+        End If
+        Dim afMaat As Double = afData(afI)(0)
+        If afMaat > 0 Then
+            Dim afHoek As Double = afData(afI)(1)
+            Dim afDrop As Double = afMaat * Math.Tan(afHoek * Math.PI / 180.0)
+            If Math.Abs(diameters(afI) - diameters(afI + 1)) < 0.000001 OrElse afGroot - afDrop <= afBinnenEind + 0.000001 Then
+                MessageBox.Show("Buitenafschuining na sectie " & (afI + 1) & " raakt de binnenrand/ondersnijding of mist een diameterstap.", "Rotoras Generator 2.3.2")
+                Return
+            End If
+            Dim afRichting As Double = If(afKleinLinks, 1.0, -1.0)
+            afTaken.Add(New Double() {afX, afGroot, afRichting, afMaat, afDrop})
+            afNamen.Add("Buitenafschuining_na_sectie_" & (afI + 1))
+            If afKleinLinks Then
+                afLinksExtent(afI + 1) = afMaat
+            Else
+                afRechtsExtent(afI) = afMaat
+            End If
+        End If
+    Next
+    Dim afTotaleLengte As Double = 0
+    For Each afLengte As Double In lengtes
+        afTotaleLengte += afLengte
+    Next
+    For afKant As Integer = 0 To 1
+        Dim afSectie As Integer = If(afKant = 0, 0, diameters.Count - 1)
+        Dim afIndex As Integer = If(afKant = 0, 2, 4)
+        Dim afMaat As Double = afData(afSectie)(afIndex)
+        If afMaat > 0 Then
+            Dim afHoek As Double = afData(afSectie)(afIndex + 1)
+            Dim afDrop As Double = afMaat * Math.Tan(afHoek * Math.PI / 180.0)
+            Dim afRadius As Double = diameters(afSectie) / 2.0
+            If afDrop >= afRadius Then
+                MessageBox.Show("Eindafschuining reikt tot de hartlijn.", "Rotoras Generator 2.3.2")
+                Return
+            End If
+            afTaken.Add(New Double() {If(afKant = 0, 0.0, afTotaleLengte), afRadius, If(afKant = 0, 1.0, -1.0), afMaat, afDrop})
+            afNamen.Add(If(afKant = 0, "Eindafschuining_links", "Eindafschuining_rechts"))
+            If afKant = 0 Then
+                afLinksExtent(afSectie) = afMaat
+            Else
+                afRechtsExtent(afSectie) = afMaat
+            End If
+        End If
+    Next
+    For afI As Integer = 0 To diameters.Count - 1
+        If afLinksExtent(afI) + afRechtsExtent(afI) >= lengtes(afI) AndAlso afLinksExtent(afI) + afRechtsExtent(afI) > 0 Then
+            MessageBox.Show("Randbewerkingen overlappen binnen sectie " & (afI + 1) & ". Vergroot de lengte of verklein de randbewerkingen.", "Rotoras Generator 2.3.2")
+            Return
+        End If
+    Next
+    For afI As Integer = 0 To afTaken.Count - 1
+        Dim afTaak() As Double = afTaken(afI)
+        Dim afSX As Double = afTaak(0) / 10.0
+        Dim afR As Double = afTaak(1) / 10.0
+        Dim afEX As Double = (afTaak(0) + afTaak(2) * afTaak(3)) / 10.0
+        Dim afBodemR As Double = (afTaak(1) - afTaak(4)) / 10.0
+        Try
+            Dim afSketch As PlanarSketch = oDef.Sketches.Add(oDef.WorkPlanes.Item(3))
+            afSketch.Name = afNamen(afI) & "_profiel"
+            Dim afL1 As SketchLine = afSketch.SketchLines.AddByTwoPoints(tg.CreatePoint2d(afSX, afR), tg.CreatePoint2d(afEX, afR))
+            Dim afL2 As SketchLine = afSketch.SketchLines.AddByTwoPoints(afL1.EndSketchPoint, tg.CreatePoint2d(afSX, afBodemR))
+            afSketch.SketchLines.AddByTwoPoints(afL2.EndSketchPoint, afL1.StartSketchPoint)
+            Dim afAs As SketchLine = afSketch.SketchLines.AddByTwoPoints(tg.CreatePoint2d(afSX - 1.0, 0), tg.CreatePoint2d(afSX + 1.0, 0))
+            afAs.Construction = True
+            afSketch.UpdateProfiles()
+            Dim afProfiel As Profile = afSketch.Profiles.AddForSolid()
+            Dim afCut As RevolveFeature = oDef.Features.RevolveFeatures.AddFull(afProfiel, afAs, PartFeatureOperationEnum.kCutOperation)
+            afCut.Name = afNamen(afI)
+            oDoc.Update()
+        Catch afChamferError As Exception
+            MessageBox.Show("Afschuining kon niet worden gemaakt: " & afNamen(afI) & vbCrLf & afChamferError.Message, "Rotoras Generator 2.3.2")
+            Return
+        End Try
+    Next
+End If
+
+' ============================================================
+' 7. SPIEBANEN - GLOBAAL, ONAFHANKELIJK VAN SECTIES
+' ============================================================
+'
+' SpieBegin   = absolute maat vanaf linker kopse zijde van de as
+' SpieLengte  = totale sleuflengte inclusief beide halfronden
+' SpieBreedte = sleufbreedte; eindradius = breedte / 2
+' SpieDiepte  = ABSOLUTE BODEMDIAMETER
+'
+' Een spiebaan mag door meerdere secties lopen en mag buiten
+' de linker/rechter kopse zijde uitsteken.
+' De bodem blijft overal op dezelfde absolute diameter.
+' ============================================================
+
+Dim totaleAsLengteMM As Double = 0
+For j As Integer = 0 To lengtes.Count - 1
+    totaleAsLengteMM += lengtes(j)
+Next
+
+For i As Integer = 0 To spieLengte.Count - 1
+
+    If spieLengte(i) > 0 Then
+
+        Dim sbStartMM As Double = spieBegin(i)
+        Dim sbEndMM As Double = sbStartMM + spieLengte(i)
+        Dim sbBMM As Double = spieBreedte(i)
+        Dim sbBodemDMM As Double = spieDiepte(i)
+
+        If spieLengte(i) < sbBMM Then
+            MessageBox.Show("Spiebaanlengte is kleiner dan de breedte." & vbCrLf & vbCrLf & _
+                "Regel: " & (i + 1), "Rotoras Generator 2.3.2")
+            Return
+        End If
+
+        ' De spiebaan mag buiten de linker en/of rechter kopse zijde
+        ' doorlopen. Dit is nodig voor een open uitlopende spiebaan.
+        ' Alleen controleren of de sleuf de as daadwerkelijk raakt.
+        If sbEndMM <= 0 Or sbStartMM >= totaleAsLengteMM Then
+            MessageBox.Show("De spiebaan raakt de as niet." & vbCrLf & vbCrLf & _
+                "As loopt van 0 t/m " & totaleAsLengteMM & " mm" & vbCrLf & _
+                "Spiebaan loopt van " & sbStartMM & " t/m " & sbEndMM & " mm", _
+                "Rotoras Generator 2.3.2")
+            Return
+        End If
+
+        If sbBodemDMM <= 0 Then
+            MessageBox.Show("SpieDiepte/bodemdiameter moet groter zijn dan 0 mm.", "Rotoras Generator 2.3.2")
+            Return
+        End If
+
+        ' Bepaal de grootste buitendiameter die de spiebaan raakt.
+        ' Het schetsvlak komt net buiten deze diameter te liggen.
+        Dim maxDiameterMM As Double = 0
+        Dim minDiameterMM As Double = 1.0E+99
+        Dim controleStartMM As Double = 0
+
+        For j As Integer = 0 To diameters.Count - 1
+            Dim controleEindMM As Double = controleStartMM + lengtes(j)
+
+            If sbEndMM > controleStartMM + 0.0001 And _
+               sbStartMM < controleEindMM - 0.0001 Then
+
+                If diameters(j) > maxDiameterMM Then maxDiameterMM = diameters(j)
+                If diameters(j) < minDiameterMM Then minDiameterMM = diameters(j)
+            End If
+
+            controleStartMM = controleEindMM
+        Next
+
+        If maxDiameterMM <= 0 Then
+            MessageBox.Show("Er kon geen assectie onder de spiebaan worden gevonden.", "Rotoras Generator 2.3.2")
+            Return
+        End If
+
+        ' De opgegeven bodemdiameter moet onder alle geraakte
+        ' buitendiameters liggen, anders bestaat daar geen snede.
+        If sbBodemDMM >= minDiameterMM Then
+            MessageBox.Show("De opgegeven spiebaan-bodemdiameter is niet kleiner dan alle secties waar de spiebaan doorheen loopt." & vbCrLf & vbCrLf & _
+                "Kleinste geraakte asdiameter = Ø" & minDiameterMM & " mm" & vbCrLf & _
+                "Spiebaan-bodem = Ø" & sbBodemDMM & " mm", _
+                "Rotoras Generator 2.3.2")
+            Return
+        End If
+
+        Dim buitenOverlapMM As Double = 0.01
+        Dim maxRadiusMM As Double = maxDiameterMM / 2.0
+        Dim bodemRadiusMM As Double = sbBodemDMM / 2.0
+
+        ' Omdat het vlak buiten de GROOTSTE geraakte diameter ligt,
+        ' snijden we tot de absolute bodemradius. Daardoor blijft de
+        ' bodemdiameter gelijk, ook over verschillende sectiediameters.
+        Dim vlakOffsetCM As Double = (maxRadiusMM + buitenOverlapMM) / 10.0
+        Dim snijAfstandMM As Double = (maxRadiusMM - bodemRadiusMM) + buitenOverlapMM
+
+        Dim spieVlak As WorkPlane
+        Try
+            spieVlak = oDef.WorkPlanes.AddByPlaneAndOffset( _
+                oDef.WorkPlanes.Item(2), vlakOffsetCM)
+            spieVlak.Name = "Spiebaan_vlak_" & (i + 1)
+            spieVlak.Visible = False
+        Catch ex As Exception
+            MessageBox.Show("Werkvlak voor spiebaan kon niet worden gemaakt." & vbCrLf & vbCrLf & ex.Message, _
+                "Rotoras Generator 2.3.2")
+            Return
+        End Try
+
+        Dim spieSketch As PlanarSketch
+        spieSketch = oDef.Sketches.Add(spieVlak)
+        spieSketch.Name = "Spiebaan_schets_" & (i + 1)
+
+        Dim x1CM As Double = sbStartMM / 10.0
+        Dim x2CM As Double = sbEndMM / 10.0
+        Dim vlakY As Double = vlakOffsetCM
+
+        Dim slotStart As Point2d
+        Dim slotEinde As Point2d
+
+        slotStart = spieSketch.ModelToSketchSpace(tg.CreatePoint(x1CM, vlakY, 0))
+        slotEinde = spieSketch.ModelToSketchSpace(tg.CreatePoint(x2CM, vlakY, 0))
+
+        Dim slotEntities As SketchEntitiesEnumerator
+        Try
+            slotEntities = spieSketch.AddStraightSlotByOverall( _
+                slotStart, slotEinde, sbBMM / 10.0)
+        Catch ex As Exception
+            MessageBox.Show("Spiebaancontour kon niet worden gemaakt." & vbCrLf & vbCrLf & ex.Message, _
+                "Rotoras Generator 2.3.2")
+            Return
+        End Try
+
+        spieSketch.UpdateProfiles()
+
+        Dim spieProfiel As Profile
+        Try
+            spieProfiel = spieSketch.Profiles.AddForSolid()
+        Catch ex As Exception
+            MessageBox.Show("Gesloten spiebaanprofiel kon niet worden gemaakt." & vbCrLf & vbCrLf & ex.Message, _
+                "Rotoras Generator 2.3.2")
+            Return
+        End Try
+
+        Dim spieCut As ExtrudeFeature = Nothing
+
+        Try
+            Dim cutDef As ExtrudeDefinition
+            cutDef = oExtrudes.CreateExtrudeDefinition(spieProfiel, PartFeatureOperationEnum.kCutOperation)
+            cutDef.SetDistanceExtent( _
+                snijAfstandMM.ToString(System.Globalization.CultureInfo.InvariantCulture) & " mm", _
+                PartFeatureExtentDirectionEnum.kNegativeExtentDirection)
+            spieCut = oExtrudes.Add(cutDef)
+
+        Catch eersteFout As Exception
+            Try
+                Dim cutDef2 As ExtrudeDefinition
+                cutDef2 = oExtrudes.CreateExtrudeDefinition(spieProfiel, PartFeatureOperationEnum.kCutOperation)
+                cutDef2.SetDistanceExtent( _
+                    snijAfstandMM.ToString(System.Globalization.CultureInfo.InvariantCulture) & " mm", _
+                    PartFeatureExtentDirectionEnum.kPositiveExtentDirection)
+                spieCut = oExtrudes.Add(cutDef2)
+            Catch tweedeFout As Exception
+                MessageBox.Show("Spiebaan kon niet worden uitgesneden." & vbCrLf & vbCrLf & _
+                    "Begin = " & sbStartMM & " mm" & vbCrLf & _
+                    "Einde = " & sbEndMM & " mm" & vbCrLf & _
+                    "Breedte = " & sbBMM & " mm" & vbCrLf & _
+                    "Bodem = Ø" & sbBodemDMM & " mm" & vbCrLf & vbCrLf & _
+                    tweedeFout.Message, "Rotoras Generator 2.3.2")
+                Return
+            End Try
+        End Try
+
+        spieCut.Name = _
+            "Spiebaan_" & (i + 1) & _
+            "_L" & spieLengte(i).ToString(System.Globalization.CultureInfo.InvariantCulture) & _
+            "_B" & sbBMM.ToString(System.Globalization.CultureInfo.InvariantCulture) & _
+            "_BodemD" & sbBodemDMM.ToString(System.Globalization.CultureInfo.InvariantCulture)
+
+        spieSketch.Visible = False
+        spieVlak.Visible = False
+        oDoc.Update()
+
+    End If
+
+Next
+
+
+' ============================================================
+' 7B. GEBRUIKTE DIN509E MATEN OPSLAAN IN CUSTOM IPROPERTY
+' ============================================================
+
+Dim dinRegels As New List(Of String)
+
+For i As Integer = 0 To overgangen.Count - 1
+
+    Dim ov As String
+    ov = overgangen(i).Trim().ToLower()
+
+    If ov = "din509e" Or ov = "din509-e" Then
+
+        Dim rWaarde As Double = radii(i)
+        Dim d1Waarde As Double = dieptes(i)
+        Dim fWaarde As Double = breedtes(i)
+
+        If rWaarde > 0 And d1Waarde > 0 And fWaarde > 0 Then
+
+            ' Opslagformaat:
+            ' R|d1|f
+            ' Bijvoorbeeld: 1,5|0,3|2,7
+
+            Dim regelTekst As String
+
+            regelTekst = _
+                rWaarde.ToString( _
+                    "0.###", _
+                    System.Globalization.CultureInfo.GetCultureInfo("nl-NL")) & "|" & _
+                d1Waarde.ToString( _
+                    "0.###", _
+                    System.Globalization.CultureInfo.GetCultureInfo("nl-NL")) & "|" & _
+                fWaarde.ToString( _
+                    "0.###", _
+                    System.Globalization.CultureInfo.GetCultureInfo("nl-NL"))
+
+            ' Dubbele identieke regels niet nogmaals toevoegen
+            If Not dinRegels.Contains(regelTekst) Then
+                dinRegels.Add(regelTekst)
+            End If
+
+        End If
+
+    End If
+
+Next
+
+
+' ============================================================
+' ALLE REGELS SAMENVOEGEN
+' ============================================================
+
+Dim dinTekst As String = ""
+
+For Each regelTekst As String In dinRegels
+
+    If dinTekst <> "" Then
+        dinTekst &= ";"
+    End If
+
+    dinTekst &= regelTekst
+
+Next
+
+
+' ============================================================
+' CUSTOM IPROPERTY AANMAKEN / BIJWERKEN
+' ============================================================
+
+Dim customProps As PropertySet
+
+customProps = oDoc.PropertySets.Item( _
+    "Inventor User Defined Properties")
+
+
+Try
+
+    customProps.Item("DIN509E_Tabel").Value = dinTekst
+
+Catch
+
+    customProps.Add( _
+        dinTekst, _
+        "DIN509E_Tabel")
+
+End Try
+
+
+' Oude property eventueel verwijderen
+Try
+    customProps.Item("DIN509E_Radii").Delete()
+Catch
+End Try
+
+' ============================================================
+' 7C. ROTORAS GEGEVENS OPSLAAN VOOR DWG GENERATOR
+' ============================================================
+'
+' Deze gegevens worden als Custom iProperties opgeslagen
+' in de IPT.
+'
+' Hierdoor kan de DWG Generator later rechtstreeks uit de
+' IPT halen:
+'
+' - aantal secties
+' - diameter per sectie
+' - lengte per sectie
+' - totale aslengte
+' - grootste diameter
+'
+' De oorspronkelijke CSV is daarna niet meer nodig voor
+' het genereren van de DWG.
+' ============================================================
+
+
+Dim rotorasDiametersTekst As String = ""
+Dim rotorasPassingenTekst As String = ""
+Dim rotorasLengtesTekst As String = ""
+Dim rotorasOvergangenTekst As String = ""
+Dim rotorasRadiiTekst As String = ""
+
+Dim rotorasTotaleLengte As Double = 0
+Dim rotorasMaxDiameter As Double = 0
+
+
+' ============================================================
+' GEGEVENS OPBOUWEN
+' ============================================================
+
+For i As Integer = 0 To diameters.Count - 1
+
+    ' --------------------------------------------------------
+    ' Scheidingsteken toevoegen
+    ' --------------------------------------------------------
+
+    If rotorasDiametersTekst <> "" Then
+        rotorasDiametersTekst &= "|"
+    End If
+
+    If rotorasLengtesTekst <> "" Then
+        rotorasLengtesTekst &= "|"
+    End If
+
+    If i > 0 Then
+        rotorasPassingenTekst &= "|"
+        rotorasOvergangenTekst &= "|"
+        rotorasRadiiTekst &= "|"
+    End If
+
+
+    ' --------------------------------------------------------
+    ' DIAMETER OPSLAAN
+    ' --------------------------------------------------------
+
+    rotorasDiametersTekst &= _
+        diameters(i).ToString( _
+            "0.###", _
+            System.Globalization.CultureInfo.InvariantCulture)
+
+    If i < passingen.Count Then
+        rotorasPassingenTekst &= passingen(i)
+    End If
+
+    If i < overgangen.Count Then
+        rotorasOvergangenTekst &= overgangen(i)
+    End If
+
+    If i < radii.Count AndAlso radii(i) > 0 Then
+        rotorasRadiiTekst &= radii(i).ToString( _
+            "0.###", _
+            System.Globalization.CultureInfo.InvariantCulture)
+    End If
+
+
+    ' --------------------------------------------------------
+    ' LENGTE OPSLAAN
+    ' --------------------------------------------------------
+
+    rotorasLengtesTekst &= _
+        lengtes(i).ToString( _
+            "0.###", _
+            System.Globalization.CultureInfo.InvariantCulture)
+
+
+    ' --------------------------------------------------------
+    ' TOTALE LENGTE
+    ' --------------------------------------------------------
+
+    rotorasTotaleLengte += lengtes(i)
+
+
+    ' --------------------------------------------------------
+    ' GROOTSTE DIAMETER
+    ' --------------------------------------------------------
+
+    If diameters(i) > rotorasMaxDiameter Then
+        rotorasMaxDiameter = diameters(i)
+    End If
+
+Next
+
+
+
+' ============================================================
+' DRAADGEGEVENS OPBOUWEN VOOR DWG GENERATOR
+' ============================================================
+'
+' Per sectie wordt opgeslagen:
+'   - leeg  = gewone diameter
+'   - M12   = metrische grove draad
+'   - M20   = metrische grove draad
+'   enz.
+'
+' DIN76-1 B markeert de overgang aan het einde van de
+' draadsectie. De kleinste van de twee aangrenzende
+' diameters is de draadsectie.
+'
+' Voor metrische grove draad hoeft de spoed niet in de
+' aanduiding te worden gezet.
+' ============================================================
+
+Dim rotorasDraadPerSectie As New List(Of String)
+
+For i As Integer = 0 To diameters.Count - 1
+    rotorasDraadPerSectie.Add("")
+Next
+
+For i As Integer = 0 To overgangen.Count - 1
+
+    Dim overgangDraadTekst As String = _
+        overgangen(i).Trim().ToLower()
+
+    If overgangDraadTekst = "din76-1 b" OrElse _
+       overgangDraadTekst = "din76b" Then
+
+        If i < diameters.Count - 1 Then
+
+            Dim draadSectieIndex As Integer
+
+            If diameters(i) < diameters(i + 1) Then
+                draadSectieIndex = i
+            Else
+                draadSectieIndex = i + 1
+            End If
+
+            Dim draadNominaal As Double = _
+                Math.Min(diameters(i), diameters(i + 1))
+
+            rotorasDraadPerSectie(draadSectieIndex) = _
+                "M" & draadNominaal.ToString( _
+                    "0.###", _
+                    System.Globalization.CultureInfo.InvariantCulture)
+
+        End If
+
+    End If
+
+Next
+
+
+Dim rotorasDraadTekst As String = ""
+
+For i As Integer = 0 To rotorasDraadPerSectie.Count - 1
+
+    If i > 0 Then
+        rotorasDraadTekst &= "|"
+    End If
+
+    rotorasDraadTekst &= rotorasDraadPerSectie(i)
+
+Next
+
+
+' ============================================================
+' DIN76 POSITIES VOOR DWG GENERATOR
+' ============================================================
+'
+' Iedere DIN76-1 B overgang wordt opgeslagen als axiale
+' positie vanaf de linker kopse zijde van de as.
+' ============================================================
+
+Dim rotorasDIN76PositiesTekst As String = ""
+Dim din76Cumulatief As Double = 0
+
+For i As Integer = 0 To diameters.Count - 1
+
+    din76Cumulatief += lengtes(i)
+
+    If i < overgangen.Count Then
+
+        Dim din76OvergangTekst As String = _
+            overgangen(i).Trim().ToLower()
+
+        If din76OvergangTekst = "din76-1 b" OrElse _
+           din76OvergangTekst = "din76b" Then
+
+            If rotorasDIN76PositiesTekst <> "" Then
+                rotorasDIN76PositiesTekst &= "|"
+            End If
+
+            rotorasDIN76PositiesTekst &= _
+                din76Cumulatief.ToString( _
+                    "0.###", _
+                    System.Globalization.CultureInfo.InvariantCulture)
+
+        End If
+
+    End If
+
+Next
+
+
+
+
+' ============================================================
+' SPIEBAANGEGEVENS OPBOUWEN VOOR DWG GENERATOR
+' ============================================================
+'
+' De bestaande CSV-data wordt 1-op-1 doorgegeven:
+'   SpieBegin   = positie vanaf linkerzijde
+'   SpieLengte  = lengte van de spiebaan
+'   SpieBreedte = breedte van de spiebaan
+'   SpieDiepte  = doel-/bodemdiameter zoals gebruikt door
+'                 de Rotoras Generator
+'
+' Waarden per sectie worden met | gescheiden.
+' Lege waarden blijven leeg zodat de sectie-index behouden blijft.
+' ============================================================
+
+Dim rotorasSpieBeginTekst As String = ""
+Dim rotorasSpieLengteTekst As String = ""
+Dim rotorasSpieBreedteTekst As String = ""
+Dim rotorasSpieDiepteTekst As String = ""
+
+For i As Integer = 0 To spieLengte.Count - 1
+
+    If i > 0 Then
+        rotorasSpieBeginTekst &= "|"
+        rotorasSpieLengteTekst &= "|"
+        rotorasSpieBreedteTekst &= "|"
+        rotorasSpieDiepteTekst &= "|"
+    End If
+
+    If i < spieBegin.Count AndAlso spieBegin(i) > 0 Then
+        rotorasSpieBeginTekst &= _
+            spieBegin(i).ToString( _
+                "0.###", _
+                System.Globalization.CultureInfo.InvariantCulture)
+    End If
+
+    If i < spieLengte.Count AndAlso spieLengte(i) > 0 Then
+        rotorasSpieLengteTekst &= _
+            spieLengte(i).ToString( _
+                "0.###", _
+                System.Globalization.CultureInfo.InvariantCulture)
+    End If
+
+    If i < spieBreedte.Count AndAlso spieBreedte(i) > 0 Then
+        rotorasSpieBreedteTekst &= _
+            spieBreedte(i).ToString( _
+                "0.###", _
+                System.Globalization.CultureInfo.InvariantCulture)
+    End If
+
+    If i < spieDiepte.Count AndAlso spieDiepte(i) > 0 Then
+        rotorasSpieDiepteTekst &= _
+            spieDiepte(i).ToString( _
+                "0.###", _
+                System.Globalization.CultureInfo.InvariantCulture)
+    End If
+
+Next
+
+
+' ============================================================
+' CUSTOM IPROPERTIES
+' ============================================================
+
+Dim rotorasProps As PropertySet
+
+rotorasProps = oDoc.PropertySets.Item( _
+    "Inventor User Defined Properties")
+
+
+' ============================================================
+' DIAMETERS
+' ============================================================
+
+Try
+
+    rotorasProps.Item( _
+        "Rotoras_Diameters").Value = _
+        rotorasDiametersTekst
+
+Catch
+
+    rotorasProps.Add( _
+        rotorasDiametersTekst, _
+        "Rotoras_Diameters")
+
+End Try
+
+
+' ============================================================
+' PASSINGEN PER SECTIE
+' ============================================================
+
+Try
+    rotorasProps.Item("Rotoras_Passingen").Value = rotorasPassingenTekst
+Catch
+    rotorasProps.Add(rotorasPassingenTekst, "Rotoras_Passingen")
+End Try
+
+
+' ============================================================
+' LENGTES
+' ============================================================
+
+Try
+
+    rotorasProps.Item( _
+        "Rotoras_Lengtes").Value = _
+        rotorasLengtesTekst
+
+Catch
+
+    rotorasProps.Add( _
+        rotorasLengtesTekst, _
+        "Rotoras_Lengtes")
+
+End Try
+
+
+
+' ============================================================
+' OVERGANGEN EN RADII PER SECTIE
+' ============================================================
+
+Try
+    rotorasProps.Item("Rotoras_Overgangen").Value = rotorasOvergangenTekst
+Catch
+    rotorasProps.Add(rotorasOvergangenTekst, "Rotoras_Overgangen")
+End Try
+
+Try
+    rotorasProps.Item("Rotoras_Radii").Value = rotorasRadiiTekst
+Catch
+    rotorasProps.Add(rotorasRadiiTekst, "Rotoras_Radii")
+End Try
+
+
+' ============================================================
+' DRAAD PER SECTIE
+' ============================================================
+
+Try
+
+    rotorasProps.Item( _
+        "Rotoras_Draad").Value = _
+        rotorasDraadTekst
+
+Catch
+
+    rotorasProps.Add( _
+        rotorasDraadTekst, _
+        "Rotoras_Draad")
+
+End Try
+
+
+' ============================================================
+' DIN76 OVERGANGSPOSITIES
+' ============================================================
+
+Try
+    rotorasProps.Item("Rotoras_DIN76_Posities").Value = _
+        rotorasDIN76PositiesTekst
+Catch
+    rotorasProps.Add( _
+        rotorasDIN76PositiesTekst, _
+        "Rotoras_DIN76_Posities")
+End Try
+
+
+
+' ============================================================
+' SPIEBAAN DATA
+' ============================================================
+
+Try
+    rotorasProps.Item("Rotoras_SpieBegin").Value = _
+        rotorasSpieBeginTekst
+Catch
+    rotorasProps.Add( _
+        rotorasSpieBeginTekst, _
+        "Rotoras_SpieBegin")
+End Try
+
+
+Try
+    rotorasProps.Item("Rotoras_SpieLengte").Value = _
+        rotorasSpieLengteTekst
+Catch
+    rotorasProps.Add( _
+        rotorasSpieLengteTekst, _
+        "Rotoras_SpieLengte")
+End Try
+
+
+Try
+    rotorasProps.Item("Rotoras_SpieBreedte").Value = _
+        rotorasSpieBreedteTekst
+Catch
+    rotorasProps.Add( _
+        rotorasSpieBreedteTekst, _
+        "Rotoras_SpieBreedte")
+End Try
+
+
+Try
+    rotorasProps.Item("Rotoras_SpieDiepte").Value = _
+        rotorasSpieDiepteTekst
+Catch
+    rotorasProps.Add( _
+        rotorasSpieDiepteTekst, _
+        "Rotoras_SpieDiepte")
+End Try
+
+
+' ============================================================
+' AANTAL SECTIES
+' ============================================================
+
+Try
+
+    rotorasProps.Item( _
+        "Rotoras_Secties").Value = _
+        diameters.Count
+
+Catch
+
+    rotorasProps.Add( _
+        diameters.Count, _
+        "Rotoras_Secties")
+
+End Try
+
+
+' ============================================================
+' TOTALE LENGTE
+' ============================================================
+
+Try
+
+    rotorasProps.Item( _
+        "Rotoras_TotaleLengte").Value = _
+        rotorasTotaleLengte
+
+Catch
+
+    rotorasProps.Add( _
+        rotorasTotaleLengte, _
+        "Rotoras_TotaleLengte")
+
+End Try
+
+
+' ============================================================
+' GROOTSTE DIAMETER
+' ============================================================
+
+Try
+
+    rotorasProps.Item( _
+        "Rotoras_MaxDiameter").Value = _
+        rotorasMaxDiameter
+
+Catch
+
+    rotorasProps.Add( _
+        rotorasMaxDiameter, _
+        "Rotoras_MaxDiameter")
+
+End Try
+
+Dim afEigenschapTekst As String = ""
+For afI As Integer = 0 To afData.Count - 1
+    If afI > 0 Then afEigenschapTekst &= ";"
+    For afJ As Integer = 0 To 5
+        If afJ > 0 Then afEigenschapTekst &= "|"
+        afEigenschapTekst &= afData(afI)(afJ).ToString(System.Globalization.CultureInfo.InvariantCulture)
+    Next
+Next
+Try
+    rotorasProps.Item("Rotoras_AfschuiningData").Value = afEigenschapTekst
+Catch
+    rotorasProps.Add(afEigenschapTekst, "Rotoras_AfschuiningData")
+End Try
+
+' ============================================================
+' 8. RESULTAAT
+' ============================================================
+
+oDoc.Update()
+
+ThisApplication.ActiveView.Fit()
+
+
+
+Dim totaleLengte As Double
+totaleLengte = 0
+
+
+Dim maxDiameter As Double
+maxDiameter = 0
+
+
+
+For i As Integer = 0 To lengtes.Count - 1
+
+
+    totaleLengte += lengtes(i)
+
+
+    If diameters(i) > maxDiameter Then
+        maxDiameter = diameters(i)
+    End If
+
+
+Next
+
+
+
+MessageBox.Show( _
+    "Rotoras succesvol gegenereerd!" & _
+    vbCrLf & vbCrLf & _
+    "Versie: 2.3.2" & vbCrLf & _
+    "Aantal secties: " & diameters.Count & vbCrLf & _
+    "Totale lengte: " & totaleLengte & " mm" & vbCrLf & _
+    "Grootste diameter: Ø" & maxDiameter & " mm", _
+    "Rotoras Generator 2.3.2")
+

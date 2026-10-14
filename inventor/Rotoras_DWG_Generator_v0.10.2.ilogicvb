@@ -1,0 +1,3217 @@
+﻿' ============================================================
+' ROTORAS DWG GENERATOR v0.10.2
+' ============================================================
+'
+' - ANSI (mm) DWG-template
+' - Top View onderaan
+' - Automatische schaal in stappen van 5%
+' - Maximaal ca. 350 mm tekenbreedte
+' - Hartlijn
+' - Langsdoorsnede A-A
+' - Cumulatieve lengtematen links/rechts
+' - Totale lengte
+' - Automatische Ø-maten
+' - Afschuiningaanduidingen onder A-A: axiale maat × hoek
+'
+' NIEUW v0.4.6:
+' - Ø-tekst horizontaal
+' - Ø-tekst boven de rotoras
+' - Automatische anti-overlap
+' - Korte secties worden trapsgewijs hoger bemaat
+'
+' ============================================================
+
+
+Sub Main()
+
+
+    ' ========================================================
+    ' 1. INVENTOR / ACTIEF DOCUMENT
+    ' ========================================================
+
+    Dim invApp As Inventor.Application
+    invApp = ThisApplication
+
+
+    If invApp.ActiveDocument.DocumentType <> _
+        Inventor.DocumentTypeEnum.kPartDocumentObject Then
+
+        MessageBox.Show( _
+            "Open eerst de rotoras (.ipt).", _
+            "Rotoras DWG Generator v0.10.2")
+
+        Exit Sub
+
+    End If
+
+
+    Dim partDoc As Inventor.PartDocument
+    partDoc = invApp.ActiveDocument
+
+
+
+    ' ========================================================
+    ' 2. DWG TEMPLATE
+    ' ========================================================
+
+    Dim templatePath As String
+
+    templatePath = _
+        "C:\Users\Public\Documents\Autodesk\Inventor 2027\Templates\Metric\ANSI (mm).dwg"
+
+
+    If Not System.IO.File.Exists(templatePath) Then
+
+        MessageBox.Show( _
+            "DWG-template niet gevonden:" & _
+            vbCrLf & vbCrLf & _
+            templatePath, _
+            "Rotoras DWG Generator v0.10.2")
+
+        Exit Sub
+
+    End If
+
+
+
+    ' ========================================================
+    ' 3. ROTORAS CUSTOM IPROPERTIES
+    ' ========================================================
+
+    Dim customProps As Inventor.PropertySet
+
+    customProps = _
+        partDoc.PropertySets.Item( _
+            "Inventor User Defined Properties")
+
+
+    Dim heeftRotorasData As Boolean = True
+
+    Dim propDiameters As String = ""
+    Dim propPassingen As String = ""
+    Dim propLengtes As String = ""
+    Dim propDraad As String = ""
+    Dim propSpieBegin As String = ""
+    Dim propSpieLengte As String = ""
+    Dim propSpieBreedte As String = ""
+    Dim propSpieDiepte As String = ""
+    Dim propDIN76Posities As String = ""
+    Dim propDIN509ETabel As String = ""
+    Dim propOvergangen As String = ""
+    Dim propRadii As String = ""
+    Dim propKopgaten As String = ""
+    Dim propAfschuiningData As String = ""
+
+
+    Try
+        propDiameters = _
+            CStr(customProps.Item("Rotoras_Diameters").Value)
+    Catch
+        heeftRotorasData = False
+    End Try
+
+
+    Try
+        propLengtes = _
+            CStr(customProps.Item("Rotoras_Lengtes").Value)
+    Catch
+        heeftRotorasData = False
+    End Try
+
+    Try
+        propPassingen = CStr(customProps.Item("Rotoras_Passingen").Value)
+    Catch
+        propPassingen = ""
+    End Try
+
+
+
+    ' Rotoras_Draad is optioneel zodat oudere assen nog openen.
+    Try
+        propDraad = _
+            CStr(customProps.Item("Rotoras_Draad").Value)
+    Catch
+        propDraad = ""
+    End Try
+
+    Try
+        propSpieBegin = CStr(customProps.Item("Rotoras_SpieBegin").Value)
+        propSpieLengte = CStr(customProps.Item("Rotoras_SpieLengte").Value)
+        propSpieBreedte = CStr(customProps.Item("Rotoras_SpieBreedte").Value)
+        propSpieDiepte = CStr(customProps.Item("Rotoras_SpieDiepte").Value)
+    Catch
+        propSpieBegin = ""
+        propSpieLengte = ""
+        propSpieBreedte = ""
+        propSpieDiepte = ""
+    End Try
+
+    Try
+        propDIN76Posities = _
+            CStr(customProps.Item("Rotoras_DIN76_Posities").Value)
+    Catch
+        propDIN76Posities = ""
+    End Try
+
+    Try
+        propDIN509ETabel = _
+            CStr(customProps.Item("DIN509E_Tabel").Value)
+    Catch
+        propDIN509ETabel = ""
+    End Try
+
+    Try
+        propOvergangen = CStr(customProps.Item("Rotoras_Overgangen").Value)
+    Catch
+        propOvergangen = ""
+    End Try
+
+    Try
+        propRadii = CStr(customProps.Item("Rotoras_Radii").Value)
+    Catch
+        propRadii = ""
+    End Try
+
+
+
+    ' Optioneel: oudere modellen hebben alleen de 45-graden overgangen.
+    Try
+        propAfschuiningData = CStr(customProps.Item("Rotoras_AfschuiningData").Value)
+    Catch
+        propAfschuiningData = ""
+    End Try
+
+    Try
+        propKopgaten = CStr(customProps.Item("Rotoras_Kopgaten").Value)
+    Catch
+        propKopgaten = ""
+    End Try
+
+    ' ========================================================
+    ' 4. DATA INLEZEN
+    ' ========================================================
+
+    Dim dwgDiameters As New List(Of Double)
+    Dim dwgPassingen As New List(Of String)
+    Dim dwgLengtes As New List(Of Double)
+    Dim dwgDraad As New List(Of String)
+    Dim dwgSpieBegin As New List(Of Double)
+    Dim dwgSpieLengte As New List(Of Double)
+    Dim dwgSpieBreedte As New List(Of Double)
+    Dim dwgSpieDiepte As New List(Of Double)
+    Dim dwgDIN76Posities As New List(Of Double)
+    Dim dwgOvergangen As New List(Of String)
+    Dim dwgRadii As New List(Of Double)
+
+
+    If heeftRotorasData Then
+
+
+        Dim diameterVelden() As String
+        Dim lengteVelden() As String
+
+
+        diameterVelden = _
+            propDiameters.Split("|"c)
+
+        lengteVelden = _
+            propLengtes.Split("|"c)
+
+        Dim passingVelden() As String
+        If propPassingen <> "" Then
+            passingVelden = propPassingen.Split("|"c)
+        Else
+            ReDim passingVelden(diameterVelden.Length - 1)
+        End If
+
+
+        If diameterVelden.Length <> lengteVelden.Length Then
+
+            heeftRotorasData = False
+
+        Else
+
+
+            For i As Integer = 0 To diameterVelden.Length - 1
+
+
+                Dim d As Double
+                Dim L As Double
+
+
+                Dim dTekst As String
+                Dim lTekst As String
+
+
+                dTekst = _
+                    diameterVelden(i).Trim().Replace(",", ".")
+
+                lTekst = _
+                    lengteVelden(i).Trim().Replace(",", ".")
+
+
+                If Not Double.TryParse( _
+                    dTekst, _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, _
+                    d) Then
+
+                    heeftRotorasData = False
+                    Exit For
+
+                End If
+
+
+                If Not Double.TryParse( _
+                    lTekst, _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, _
+                    L) Then
+
+                    heeftRotorasData = False
+                    Exit For
+
+                End If
+
+
+                dwgDiameters.Add(d)
+                If i < passingVelden.Length Then
+                    dwgPassingen.Add(passingVelden(i).Trim())
+                Else
+                    dwgPassingen.Add("")
+                End If
+                dwgLengtes.Add(L)
+
+
+            Next
+
+
+        End If
+
+    End If
+
+
+
+
+    ' ========================================================
+    ' 4A. OVERGANGEN / RADII INLEZEN
+    ' ========================================================
+
+    If heeftRotorasData Then
+        Dim overgangVelden() As String
+        Dim radiusVelden() As String
+
+        If propOvergangen <> "" Then
+            overgangVelden = propOvergangen.Split("|"c)
+        Else
+            ReDim overgangVelden(-1)
+        End If
+
+        If propRadii <> "" Then
+            radiusVelden = propRadii.Split("|"c)
+        Else
+            ReDim radiusVelden(-1)
+        End If
+
+        For i As Integer = 0 To dwgDiameters.Count - 1
+            If i <= overgangVelden.Length - 1 Then
+                dwgOvergangen.Add(overgangVelden(i).Trim())
+            Else
+                dwgOvergangen.Add("")
+            End If
+
+            Dim rr As Double = 0
+            If i <= radiusVelden.Length - 1 Then
+                Double.TryParse(radiusVelden(i).Trim().Replace(",", "."), _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, rr)
+            End If
+            dwgRadii.Add(rr)
+        Next
+    End If
+
+
+    ' ========================================================
+    ' 4B. DRAADGEGEVENS INLEZEN
+    ' ========================================================
+    '
+    ' Rotoras_Draad bevat per sectie:
+    ' leeg = gewone diameter
+    ' M12  = metrische draad
+    ' ========================================================
+
+    If heeftRotorasData Then
+
+        Dim draadVelden() As String
+
+        If propDraad <> "" Then
+            draadVelden = propDraad.Split("|"c)
+        Else
+            ReDim draadVelden(-1)
+        End If
+
+        For i As Integer = 0 To dwgDiameters.Count - 1
+
+            If i <= draadVelden.Length - 1 Then
+                dwgDraad.Add(draadVelden(i).Trim())
+            Else
+                dwgDraad.Add("")
+            End If
+
+        Next
+
+    End If
+
+
+    ' ========================================================
+    ' 4C. SPIEBAANGEGEVENS INLEZEN
+    ' ========================================================
+
+    If heeftRotorasData Then
+
+        Dim sbBeginVelden() As String = propSpieBegin.Split("|"c)
+        Dim sbLengteVelden() As String = propSpieLengte.Split("|"c)
+        Dim sbBreedteVelden() As String = propSpieBreedte.Split("|"c)
+        Dim sbDiepteVelden() As String = propSpieDiepte.Split("|"c)
+
+        For i As Integer = 0 To Math.Max(dwgDiameters.Count, sbLengteVelden.Length) - 1
+
+            Dim vBegin As Double = 0
+            Dim vLengte As Double = 0
+            Dim vBreedte As Double = 0
+            Dim vDiepte As Double = 0
+
+            If i < sbBeginVelden.Length Then
+                Double.TryParse(sbBeginVelden(i).Trim().Replace(",", "."), _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, vBegin)
+            End If
+            If i < sbLengteVelden.Length Then
+                Double.TryParse(sbLengteVelden(i).Trim().Replace(",", "."), _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, vLengte)
+            End If
+            If i < sbBreedteVelden.Length Then
+                Double.TryParse(sbBreedteVelden(i).Trim().Replace(",", "."), _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, vBreedte)
+            End If
+            If i < sbDiepteVelden.Length Then
+                Double.TryParse(sbDiepteVelden(i).Trim().Replace(",", "."), _
+                    System.Globalization.NumberStyles.Any, _
+                    System.Globalization.CultureInfo.InvariantCulture, vDiepte)
+            End If
+
+            dwgSpieBegin.Add(vBegin)
+            dwgSpieLengte.Add(vLengte)
+            dwgSpieBreedte.Add(vBreedte)
+            dwgSpieDiepte.Add(vDiepte)
+
+        Next
+
+    End If
+
+
+    ' ========================================================
+    ' 4D. DIN76 OVERGANGSPOSITIES INLEZEN
+    ' ========================================================
+
+    If propDIN76Posities <> "" Then
+
+        Dim din76Velden() As String = _
+            propDIN76Posities.Split("|"c)
+
+        For i As Integer = 0 To din76Velden.Length - 1
+
+            Dim din76Pos As Double = 0
+
+            If Double.TryParse( _
+                din76Velden(i).Trim().Replace(",", "."), _
+                System.Globalization.NumberStyles.Any, _
+                System.Globalization.CultureInfo.InvariantCulture, _
+                din76Pos) Then
+
+                dwgDIN76Posities.Add(din76Pos)
+
+            End If
+
+        Next
+
+    End If
+
+
+    ' ========================================================
+    ' 5. TOTALE LENGTE / MAX DIAMETER
+    ' ========================================================
+
+    Dim dataTotaleLengte As Double = 0
+    Dim dataMaxDiameter As Double = 0
+
+
+    If heeftRotorasData Then
+
+
+        For i As Integer = 0 To dwgLengtes.Count - 1
+
+            dataTotaleLengte += _
+                dwgLengtes(i)
+
+        Next
+
+
+        For i As Integer = 0 To dwgDiameters.Count - 1
+
+            If dwgDiameters(i) > dataMaxDiameter Then
+
+                dataMaxDiameter = _
+                    dwgDiameters(i)
+
+            End If
+
+        Next
+
+
+    End If
+
+
+
+    ' ========================================================
+    ' 6. LENGTE VOOR AUTOMATISCHE SCHAAL
+    ' ========================================================
+
+    Dim box As Inventor.Box
+
+    box = _
+        partDoc.ComponentDefinition.RangeBox
+
+
+    Dim lengteX As Double
+
+    lengteX = _
+        box.MaxPoint.X - box.MinPoint.X
+
+
+    Dim lengteMM As Double
+
+    lengteMM = _
+        lengteX * 10.0
+
+
+    If heeftRotorasData AndAlso _
+       dataTotaleLengte > 0 Then
+
+        lengteMM = _
+            dataTotaleLengte
+
+    End If
+
+
+    If lengteMM <= 0 Then
+
+        MessageBox.Show( _
+            "Rotoraslengte kon niet worden bepaald.", _
+            "Rotoras DWG Generator v0.10.2")
+
+        Exit Sub
+
+    End If
+
+
+
+    ' ========================================================
+    ' 7. AUTOMATISCHE SCHAAL
+    ' ========================================================
+
+    Dim beschikbareBreedteMM As Double = 350.0
+
+
+    Dim maximaleSchaal As Double
+
+    maximaleSchaal = _
+        beschikbareBreedteMM / lengteMM
+
+
+    Dim viewScale As Double
+
+    viewScale = _
+        Math.Floor(maximaleSchaal / 0.05) * 0.05
+
+
+    If viewScale > 1.0 Then
+        viewScale = 1.0
+    End If
+
+
+    If viewScale < 0.05 Then
+        viewScale = 0.05
+    End If
+
+
+
+    ' ========================================================
+    ' 8. NIEUWE DWG
+    ' ========================================================
+
+    Dim drawDoc As Inventor.DrawingDocument
+
+    drawDoc = _
+        invApp.Documents.Add( _
+            Inventor.DocumentTypeEnum.kDrawingDocumentObject, _
+            templatePath, _
+            True)
+
+
+    Dim sheet As Inventor.Sheet
+
+    sheet = _
+        drawDoc.ActiveSheet
+
+
+    Dim tg As Inventor.TransientGeometry
+
+    tg = _
+        invApp.TransientGeometry
+
+
+
+    ' ========================================================
+    ' 9. ONDERSTE HOOFDAANZICHT
+    ' ========================================================
+
+    Dim viewPoint As Inventor.Point2d
+
+    viewPoint = _
+        tg.CreatePoint2d( _
+            21.0, _
+            6.8)
+
+
+    Dim baseView As Inventor.DrawingView
+
+    baseView = _
+        sheet.DrawingViews.AddBaseView( _
+            partDoc, _
+            viewPoint, _
+            viewScale, _
+            Inventor.ViewOrientationTypeEnum.kTopViewOrientation, _
+            Inventor.DrawingViewStyleEnum.kHiddenLineRemovedDrawingViewStyle)
+
+
+    drawDoc.Update()
+
+
+    ' ========================================================
+    ' 9A. TITLE BLOCK / PROPERTY FIELDS AUTOMATISCH INVULLEN
+    ' ========================================================
+    '
+    ' Automatisch:
+    '   Schaal             = werkelijke schaal van het hoofdaanzicht
+    '   Tek. naam/Nr.      = IPT-bestandsnaam zonder extensie
+    '   Tek./Art. omschr.  = Rotoras
+    '   Tek. Versie        = A
+    '   Getekend door      = WH
+    '
+    ' Handmatig:
+    '   OrderNr.
+    '   Ref. / Projectinfo
+    ' ========================================================
+
+    Try
+        Dim schaalTekst As String
+
+        If Math.Abs(viewScale - 1.0) < 0.000001 Then
+            schaalTekst = "1:1"
+        Else
+            Dim schaalNoemer As Double
+            schaalNoemer = 1.0 / viewScale
+
+            schaalTekst = "1:" & _
+                schaalNoemer.ToString("0.##", _
+                    System.Globalization.CultureInfo.InvariantCulture).Replace(".", ",")
+        End If
+
+        Dim tekenNaam As String
+        tekenNaam = System.IO.Path.GetFileNameWithoutExtension(partDoc.FullFileName)
+
+        If tekenNaam Is Nothing OrElse tekenNaam.Trim() = "" Then
+            tekenNaam = System.IO.Path.GetFileNameWithoutExtension(partDoc.DisplayName)
+        End If
+
+        Dim tb As Inventor.TitleBlock
+        tb = sheet.TitleBlock
+
+        If Not tb Is Nothing Then
+            For Each txtBox As Inventor.TextBox In tb.Definition.Sketch.TextBoxes
+
+                Dim veldNaam As String = ""
+                Try
+                    veldNaam = txtBox.Text.Trim()
+                Catch
+                End Try
+
+                Dim nieuweWaarde As String = ""
+                Dim veldInvullen As Boolean = True
+
+                Select Case veldNaam
+                    Case "<Schaal?>", "Schaal?", "<Schaal>", "Schaal"
+                        nieuweWaarde = schaalTekst
+
+                    Case "<Tek. naam/Nr.?>", "Tek. naam/Nr.?", _
+                         "<Tek. naam/Nr.>", "Tek. naam/Nr."
+                        nieuweWaarde = tekenNaam
+
+                    Case "<Tek./Art. omschr.?>", "Tek./Art. omschr.?", _
+                         "<Tek./Art. omschr.>", "Tek./Art. omschr."
+                        nieuweWaarde = "Rotoras"
+
+                    Case "<Tek. Versie?>", "Tek. Versie?", _
+                         "<Tek. Versie>", "Tek. Versie"
+                        nieuweWaarde = "A"
+
+                    Case "<Getekend door>", "Getekend door", _
+                         "<Getekend door?>", "Getekend door?"
+                        nieuweWaarde = "WH"
+
+                    Case Else
+                        veldInvullen = False
+                End Select
+
+                If veldInvullen Then
+                    Try
+                        tb.SetPromptResultText(txtBox, nieuweWaarde)
+                    Catch
+                    End Try
+                End If
+
+            Next
+        End If
+
+        drawDoc.Update()
+
+    Catch
+        ' Title block automatisering mag het genereren van de DWG nooit stoppen.
+    End Try
+
+
+
+    ' ========================================================
+    ' 10. HARTLIJN
+    ' ========================================================
+
+    Dim hartlijnSketch As Inventor.DrawingSketch
+
+    hartlijnSketch = _
+        sheet.Sketches.Add
+
+
+    hartlijnSketch.Name = _
+        "Rotoras Hartlijn"
+
+
+    hartlijnSketch.Edit()
+
+
+    Dim extraHart As Double = 0.5
+
+
+    Dim hartStart As Inventor.Point2d
+    Dim hartEind As Inventor.Point2d
+
+
+    hartStart = _
+        tg.CreatePoint2d( _
+            baseView.Left - extraHart, _
+            baseView.Center.Y)
+
+
+    hartEind = _
+        tg.CreatePoint2d( _
+            baseView.Left + baseView.Width + extraHart, _
+            baseView.Center.Y)
+
+
+    Dim hartlijn As Inventor.SketchLine
+
+    hartlijn = _
+        hartlijnSketch.SketchLines.AddByTwoPoints( _
+            hartStart, _
+            hartEind)
+
+
+    Try
+
+        hartlijn.LineType = _
+            Inventor.LineTypeEnum.kChainLineType
+
+    Catch
+
+    End Try
+
+
+    hartlijnSketch.ExitEdit()
+
+
+    ' ========================================================
+    ' 10A. DATUM A OP DE HARTLIJN - DYNAMISCH
+    ' ========================================================
+    ' Driehoek exact op de centerlijn.
+    ' Vakje altijd onder de rotoras, met bovenzijde 4 mm vrij.
+    ' A wordt in het vakje geplaatst.
+    ' ========================================================
+
+    Try
+        Dim datumX As Double = baseView.Center.X
+        Dim datumHartY As Double = baseView.Center.Y
+
+        ' Bepaal de lokale diameter op het midden van de rotoras.
+        Dim datumPosMM As Double = dataTotaleLengte / 2.0
+        Dim datumLokaleDiameterMM As Double = dataMaxDiameter
+        Dim datumSomMM As Double = 0.0
+
+        For datumI As Integer = 0 To dwgLengtes.Count - 1
+            If datumPosMM >= datumSomMM AndAlso _
+               datumPosMM <= datumSomMM + dwgLengtes(datumI) Then
+                datumLokaleDiameterMM = dwgDiameters(datumI)
+                Exit For
+            End If
+            datumSomMM += dwgLengtes(datumI)
+        Next
+
+        Dim datumLokaleRadiusBlad As Double
+        datumLokaleRadiusBlad = ((datumLokaleDiameterMM / 10.0) * viewScale) / 2.0
+
+        Dim datumAsOnderY As Double
+        datumAsOnderY = datumHartY - datumLokaleRadiusBlad
+
+        Dim datumVrijeRuimte As Double = 0.40   ' 4 mm
+        Dim datumVakBreedte As Double = 0.60    ' 6 mm
+        Dim datumVakHoogte As Double = 0.60     ' 6 mm
+
+        Dim datumVakTopY As Double
+        datumVakTopY = datumAsOnderY - datumVrijeRuimte
+
+        Dim datumVakBottomY As Double
+        datumVakBottomY = datumVakTopY - datumVakHoogte
+
+        ' Dynamische lijn + datumvak.
+        Dim datumSketch As Inventor.DrawingSketch
+        datumSketch = sheet.Sketches.Add
+        datumSketch.Name = "Rotoras Datum A"
+        datumSketch.Edit()
+
+        Dim datumLijnStart As Inventor.Point2d
+        Dim datumLijnEind As Inventor.Point2d
+        datumLijnStart = tg.CreatePoint2d(datumX, datumHartY)
+        datumLijnEind = tg.CreatePoint2d(datumX, datumVakTopY)
+
+        datumSketch.SketchLines.AddByTwoPoints(datumLijnStart, datumLijnEind)
+
+        Dim halfVak As Double = datumVakBreedte / 2.0
+        Dim p1 As Inventor.Point2d = tg.CreatePoint2d(datumX - halfVak, datumVakTopY)
+        Dim p2 As Inventor.Point2d = tg.CreatePoint2d(datumX + halfVak, datumVakTopY)
+        Dim p3 As Inventor.Point2d = tg.CreatePoint2d(datumX + halfVak, datumVakBottomY)
+        Dim p4 As Inventor.Point2d = tg.CreatePoint2d(datumX - halfVak, datumVakBottomY)
+
+        datumSketch.SketchLines.AddByTwoPoints(p1, p2)
+        datumSketch.SketchLines.AddByTwoPoints(p2, p3)
+        datumSketch.SketchLines.AddByTwoPoints(p3, p4)
+        datumSketch.SketchLines.AddByTwoPoints(p4, p1)
+
+        datumSketch.ExitEdit()
+
+        ' Zwart driehoekje exact op de centerlijn.
+        ' GeneralNote wordt alleen als symbool gebruikt.
+        Try
+            Dim datumDriehoek As Inventor.GeneralNote
+            datumDriehoek = sheet.DrawingNotes.GeneralNotes.AddFitted( _
+                tg.CreatePoint2d(datumX - 0.22, datumHartY + 0.03), _
+                "▼")
+            Try
+                datumDriehoek.HorizontalJustification = _
+                    Inventor.HorizontalTextAlignmentEnum.kAlignTextCenter
+            Catch
+            End Try
+        Catch
+        End Try
+
+        ' A gecentreerd in het vakje.
+        Try
+            Dim datumLetter As Inventor.GeneralNote
+            datumLetter = sheet.DrawingNotes.GeneralNotes.AddFitted( _
+                tg.CreatePoint2d(datumX - 0.14, datumVakBottomY + 0.45), _
+                "A")
+            Try
+                datumLetter.HorizontalJustification = _
+                    Inventor.HorizontalTextAlignmentEnum.kAlignTextCenter
+            Catch
+            End Try
+        Catch
+        End Try
+
+    Catch exDatum As Exception
+        MessageBox.Show( _
+            "Datum A kon niet dynamisch worden geplaatst." & vbCrLf & vbCrLf & _
+            exDatum.Message, _
+            "Rotoras DWG Generator v0.10.2")
+    End Try
+
+
+    ' ========================================================
+    ' 11. SNIJLIJN A-A
+    ' ========================================================
+
+    Dim sectionSketch As Inventor.DrawingSketch
+
+    sectionSketch = _
+        baseView.Sketches.Add
+
+
+    sectionSketch.Name = _
+        "Snijlijn A-A"
+
+
+    Dim sectionExtra As Double = 1.0
+
+
+    Dim sheetStart As Inventor.Point2d
+    Dim sheetEnd As Inventor.Point2d
+
+
+    sheetStart = _
+        tg.CreatePoint2d( _
+            baseView.Left - sectionExtra, _
+            baseView.Center.Y)
+
+
+    sheetEnd = _
+        tg.CreatePoint2d( _
+            baseView.Left + baseView.Width + sectionExtra, _
+            baseView.Center.Y)
+
+
+    Dim sketchStart As Inventor.Point2d
+    Dim sketchEnd As Inventor.Point2d
+
+
+    sketchStart = _
+        sectionSketch.SheetToSketchSpace( _
+            sheetStart)
+
+
+    sketchEnd = _
+        sectionSketch.SheetToSketchSpace( _
+            sheetEnd)
+
+
+    sectionSketch.Edit()
+
+
+    Dim sectionLine As Inventor.SketchLine
+
+    sectionLine = _
+        sectionSketch.SketchLines.AddByTwoPoints( _
+            sketchStart, _
+            sketchEnd)
+
+
+    sectionSketch.ExitEdit()
+
+
+    drawDoc.Update()
+
+
+    Try
+        invApp.ActiveView.Update()
+    Catch
+    End Try
+
+
+    System.Windows.Forms.Application.DoEvents()
+
+
+
+    ' ========================================================
+    ' 12. SECTION VIEW A-A
+    ' ========================================================
+
+    Dim sectionPosition As Inventor.Point2d
+
+    sectionPosition = _
+        tg.CreatePoint2d( _
+            baseView.Center.X, _
+            15.3)
+
+
+    Dim sectionView As Inventor.SectionDrawingView
+
+    sectionView = _
+        sheet.DrawingViews.AddSectionView( _
+            baseView, _
+            sectionSketch, _
+            sectionPosition, _
+            Inventor.DrawingViewStyleEnum.kHiddenLineRemovedDrawingViewStyle, _
+            , _
+            True, _
+            "A", _
+            True, _
+            True)
+
+
+    drawDoc.Update()
+
+
+    Try
+        sectionView.ScaleFromBase = True
+    Catch
+    End Try
+
+
+    Try
+        sectionView.ShowEntireLine = False
+    Catch
+    End Try
+
+
+    ' De standaard Inventor section-callout bevat o.a. "/ .C3".
+    ' Verberg de native cutting line en plaats eigen eenvoudige A-markers.
+    Try
+        sectionView.ShowEntireLine = False
+    Catch
+    End Try
+
+    Try
+        sectionView.ShowLabel = False
+    Catch
+    End Try
+
+    ' Inventor 2026/2027 ANSI view annotations can append the sheet zone
+    ' (bijv. "/ .C3") to the section identifier. Hide the complete native
+    ' section definition in the base view; our own A-markers remain.
+    Try
+        sectionView.DisplayDefinitionInBase = False
+    Catch
+    End Try
+
+    Try
+        Dim markerY As Double
+        markerY = baseView.Center.Y
+
+        Dim markerLinks As Inventor.GeneralNote
+        markerLinks = sheet.DrawingNotes.GeneralNotes.AddFitted( _
+            tg.CreatePoint2d(baseView.Left - 1.15, markerY + 0.18), _
+            "A")
+
+        Dim markerRechts As Inventor.GeneralNote
+        markerRechts = sheet.DrawingNotes.GeneralNotes.AddFitted( _
+            tg.CreatePoint2d(baseView.Left + baseView.Width + 0.75, markerY + 0.18), _
+            "A")
+
+        ' Vergroot de A-markers naar ongeveer 2x de standaard teksthoogte.
+        ' Als de lokale Inventor-style dit niet toestaat blijven de A's in elk
+        ' geval zichtbaar op de standaard grootte.
+        Try
+            Dim markerStyle As Inventor.TextStyle
+            markerStyle = markerLinks.TextStyle.Copy("Rotoras Section Marker")
+            markerStyle.FontSize = markerLinks.TextStyle.FontSize * 2.0
+            markerLinks.TextStyle = markerStyle
+            markerRechts.TextStyle = markerStyle
+        Catch
+        End Try
+    Catch
+    End Try
+
+
+    Try
+
+        sectionView.Position = _
+            tg.CreatePoint2d( _
+                baseView.Center.X, _
+                15.3)
+
+    Catch
+    End Try
+
+
+    Try
+        sectionView.ShowLabel = False
+    Catch
+    End Try
+
+    ' Eigen titel gecentreerd boven de langsdoorsnede.
+    ' Eerst gewone tekst maken; daarna centreren op basis van RangeBox.
+    Try
+        Dim sectionTitlePoint As Inventor.Point2d
+        sectionTitlePoint = tg.CreatePoint2d( _
+            sectionView.Center.X, _
+            sectionView.Top + 0.55)
+
+        Dim sectionTitle As Inventor.GeneralNote
+        sectionTitle = sheet.DrawingNotes.GeneralNotes.AddFitted( _
+            sectionTitlePoint, _
+            "DOORSNEDE A-A")
+
+        Try
+            sectionTitle.Position = tg.CreatePoint2d( _
+                sectionView.Center.X - (sectionTitle.RangeBox.Width / 2.0), _
+                sectionView.Top + 0.55)
+        Catch
+        End Try
+    Catch
+    End Try
+
+    drawDoc.Update()
+
+
+
+
+    ' ========================================================
+    ' 12B. DIN509-E TABEL
+    ' ========================================================
+    '
+    ' Bron: Custom iProperty DIN509E_Tabel
+    ' Formaat per regel: R|d1|f
+    ' Meerdere gebruikte maten kunnen met ; gescheiden zijn.
+    '
+    ' Tabel wordt alleen geplaatst wanneer DIN509E-data aanwezig is.
+    ' Positie: linksboven, boven de langsdoorsnede.
+    ' ========================================================
+
+    If propDIN509ETabel.Trim() <> "" Then
+
+        Try
+
+            Dim din509Regels As New List(Of String)
+
+            ' Ondersteun zowel ; als regeleinde als scheiding.
+            Dim din509Bron As String
+            din509Bron = propDIN509ETabel.Replace(vbCrLf, ";")
+            din509Bron = din509Bron.Replace(vbLf, ";")
+
+            Dim din509Delen() As String
+            din509Delen = din509Bron.Split(";"c)
+
+            For Each din509Deel As String In din509Delen
+                If din509Deel.Trim() <> "" Then
+                    din509Regels.Add(din509Deel.Trim())
+                End If
+            Next
+
+            If din509Regels.Count > 0 Then
+
+                Dim din509Titels(2) As String
+                din509Titels(0) = "Radius R"
+                din509Titels(1) = "Diepte d1"
+                din509Titels(2) = "Afstand f"
+
+                Dim din509Inhoud((din509Regels.Count * 3) - 1) As String
+                Dim din509Index As Integer = 0
+
+                For Each din509Regel As String In din509Regels
+
+                    Dim din509Waarden() As String
+                    din509Waarden = din509Regel.Split("|"c)
+
+                    Dim waardeR As String = ""
+                    Dim waardeD1 As String = ""
+                    Dim waardeF As String = ""
+
+                    If din509Waarden.Length > 0 Then waardeR = din509Waarden(0).Trim()
+                    If din509Waarden.Length > 1 Then waardeD1 = din509Waarden(1).Trim()
+                    If din509Waarden.Length > 2 Then waardeF = din509Waarden(2).Trim()
+
+                    din509Inhoud(din509Index) = waardeR
+                    din509Inhoud(din509Index + 1) = waardeD1
+                    din509Inhoud(din509Index + 2) = waardeF
+                    din509Index += 3
+
+                Next
+
+                ' Compacte vaste kolombreedtes in cm.
+                Dim din509KolomBreedtes(2) As Double
+                din509KolomBreedtes(0) = 2.4
+                din509KolomBreedtes(1) = 2.4
+                din509KolomBreedtes(2) = 2.4
+
+                ' Linksboven. A3 is 42 x 29,7 cm.
+                Dim din509Punt As Inventor.Point2d
+                din509Punt = tg.CreatePoint2d(1.25, 28.45)
+
+                Dim din509Tabel As Inventor.CustomTable
+                din509Tabel = sheet.CustomTables.Add( _
+                    "Ondersnijdingen volgens DIN509-E", _
+                    din509Punt, _
+                    3, _
+                    din509Regels.Count, _
+                    din509Titels, _
+                    din509Inhoud, _
+                    din509KolomBreedtes)
+
+                din509Tabel.ShowTitle = True
+
+                ' Alles centreren voor een technische tabel.
+                For din509Kolom As Integer = 1 To din509Tabel.Columns.Count
+                    Try
+                        din509Tabel.Columns.Item(din509Kolom).ValueHorizontalJustification = _
+                            Inventor.HorizontalTextAlignmentEnum.kAlignTextCenter
+                    Catch
+                    End Try
+                Next
+
+                ' Iets zwaardere buitenlijn.
+                Try
+                    Dim din509Format As Inventor.TableFormat
+                    din509Format = sheet.CustomTables.CreateTableFormat
+                    din509Format.OutsideLineWeight = 0.05
+                    din509Format.InsideLineWeight = 0.025
+                    din509Tabel.OverrideFormat = din509Format
+                Catch
+                End Try
+
+            End If
+
+        Catch exDIN509 As Exception
+            MessageBox.Show( _
+                "DIN509-E tabel kon niet worden geplaatst:" & vbCrLf & _
+                exDIN509.Message, _
+                "Rotoras DWG Generator")
+        End Try
+
+    End If
+
+
+
+    ' ========================================================
+    ' 12C. 3D ISOMETRISCH AANZICHT RECHTSBOVEN
+    ' ========================================================
+    '
+    ' Compact onbemaat isometrisch overzicht van de complete rotoras.
+    ' Schaal wordt begrensd zodat het aanzicht in de vrije zone
+    ' rechtsboven blijft.
+    ' ========================================================
+
+    Try
+
+        Dim isoPositie As Inventor.Point2d
+        isoPositie = tg.CreatePoint2d(36.5, 25.9)
+
+        Dim isoSchaal As Double
+        isoSchaal = viewScale * 0.35
+
+        If isoSchaal > 0.25 Then isoSchaal = 0.25
+        If isoSchaal < 0.10 Then isoSchaal = 0.10
+
+        Dim isoView As Inventor.DrawingView
+        isoView = sheet.DrawingViews.AddBaseView( _
+            partDoc, _
+            isoPositie, _
+            isoSchaal, _
+            Inventor.ViewOrientationTypeEnum.kIsoTopRightViewOrientation, _
+            Inventor.DrawingViewStyleEnum.kShadedDrawingViewStyle)
+
+        Try
+            isoView.ShowLabel = False
+        Catch
+        End Try
+
+        drawDoc.Update()
+
+    Catch exIso As Exception
+        MessageBox.Show( _
+            "Het 3D-aanzicht kon niet worden geplaatst:" & vbCrLf & _
+            exIso.Message, _
+            "Rotoras DWG Generator")
+    End Try
+
+
+    ' ========================================================
+    ' 13. AUTOMATISCHE LENGTEMAATVOERING
+    ' ========================================================
+
+    Dim aantalLengtematen As Integer = 0
+    Dim aantalDiametermaten As Integer = 0
+
+
+    If heeftRotorasData AndAlso _
+       dwgLengtes.Count > 0 AndAlso _
+       dwgDiameters.Count = dwgLengtes.Count Then
+
+
+
+        ' ====================================================
+        ' GROOTSTE DIAMETER
+        ' ====================================================
+
+        Dim grootsteDiameter As Double
+
+        grootsteDiameter = _
+            dwgDiameters(0)
+
+
+        For i As Integer = 1 To dwgDiameters.Count - 1
+
+            If dwgDiameters(i) > grootsteDiameter Then
+
+                grootsteDiameter = _
+                    dwgDiameters(i)
+
+            End If
+
+        Next
+
+
+
+        ' ====================================================
+        ' EERSTE MAX SECTIE
+        ' ====================================================
+
+        Dim eersteMaxSectie As Integer = -1
+
+
+        For i As Integer = 0 To dwgDiameters.Count - 1
+
+            If Math.Abs( _
+                dwgDiameters(i) - grootsteDiameter) < 0.0001 Then
+
+                eersteMaxSectie = i
+                Exit For
+
+            End If
+
+        Next
+
+
+
+        ' ====================================================
+        ' LAATSTE AANSLUITENDE MAX SECTIE
+        ' ====================================================
+
+        Dim laatsteMaxSectie As Integer
+
+        laatsteMaxSectie = _
+            eersteMaxSectie
+
+
+        If eersteMaxSectie >= 0 Then
+
+
+            For i As Integer = _
+                eersteMaxSectie + 1 To _
+                dwgDiameters.Count - 1
+
+
+                If Math.Abs( _
+                    dwgDiameters(i) - grootsteDiameter) < 0.0001 Then
+
+                    laatsteMaxSectie = i
+
+                Else
+
+                    Exit For
+
+                End If
+
+
+            Next
+
+
+        End If
+
+
+
+        ' ====================================================
+        ' CUMULATIEVE POSITIES
+        ' ====================================================
+
+        Dim schouderPosities As New List(Of Double)
+
+        schouderPosities.Add(0.0)
+
+
+        Dim cumulatief As Double = 0
+
+
+        For i As Integer = 0 To dwgLengtes.Count - 1
+
+            cumulatief += _
+                dwgLengtes(i)
+
+            schouderPosities.Add( _
+                cumulatief)
+
+        Next
+
+
+
+        ' ====================================================
+        ' SECTION VIEW EXTENT
+        ' ====================================================
+
+        Dim asLinksX As Double
+        Dim asRechtsX As Double
+
+
+        asLinksX = _
+            sectionView.Left
+
+
+        asRechtsX = _
+            sectionView.Left + _
+            sectionView.Width
+
+
+        Dim tekenBreedte As Double
+
+        tekenBreedte = _
+            asRechtsX - asLinksX
+
+
+
+        ' ====================================================
+        ' HULPSKETCH LENGTEMATEN
+        ' ====================================================
+
+        Dim maatSketch As Inventor.DrawingSketch
+
+        maatSketch = _
+            sheet.Sketches.Add
+
+
+        maatSketch.Name = _
+            "Rotoras Automatische Lengtematen"
+
+
+        maatSketch.Edit()
+
+
+        Dim maatLijnen As _
+            New List(Of Inventor.SketchLine)
+
+
+        Dim hulpHalveHoogte As Double = 0.10
+
+
+        For i As Integer = 0 To schouderPosities.Count - 1
+
+
+            Dim fractie As Double
+
+            fractie = _
+                schouderPosities(i) / _
+                dataTotaleLengte
+
+
+            Dim xTekening As Double
+
+            xTekening = _
+                asLinksX + _
+                (tekenBreedte * fractie)
+
+
+            Dim p1 As Inventor.Point2d
+            Dim p2 As Inventor.Point2d
+
+
+            p1 = _
+                tg.CreatePoint2d( _
+                    xTekening, _
+                    sectionView.Center.Y - hulpHalveHoogte)
+
+
+            p2 = _
+                tg.CreatePoint2d( _
+                    xTekening, _
+                    sectionView.Center.Y + hulpHalveHoogte)
+
+
+            Dim hulpLijn As Inventor.SketchLine
+
+
+            hulpLijn = _
+                maatSketch.SketchLines.AddByTwoPoints( _
+                    p1, _
+                    p2)
+
+
+            Try
+                hulpLijn.Construction = True
+            Catch
+            End Try
+
+
+            maatLijnen.Add( _
+                hulpLijn)
+
+
+        Next
+
+
+        maatSketch.ExitEdit()
+
+
+
+        ' ====================================================
+        ' GEOMETRY INTENTS LENGTEMATEN
+        ' ====================================================
+
+        Dim maatIntents As _
+            New List(Of Inventor.GeometryIntent)
+
+
+        For i As Integer = 0 To maatLijnen.Count - 1
+
+
+            Try
+
+
+                Dim intent As Inventor.GeometryIntent
+
+
+                intent = _
+                    sheet.CreateGeometryIntent( _
+                        maatLijnen(i))
+
+
+                maatIntents.Add( _
+                    intent)
+
+
+            Catch
+
+
+                maatIntents.Add( _
+                    Nothing)
+
+
+            End Try
+
+
+        Next
+
+
+
+        ' ====================================================
+        ' POSITIE LENGTEMATEN
+        ' ====================================================
+
+        Dim eersteMaatY As Double
+
+        eersteMaatY = _
+            sectionView.Top + 1.0
+
+
+        Dim maatStap As Double = 0.65
+
+
+
+        ' ====================================================
+        ' LINKER CUMULATIEVE MATEN
+        ' ====================================================
+
+        Dim linkerMaatNummer As Integer = 0
+
+
+        For grensIndex As Integer = _
+            1 To eersteMaxSectie
+
+
+            If maatIntents(0) Is Nothing Then
+                Continue For
+            End If
+
+
+            If maatIntents(grensIndex) Is Nothing Then
+                Continue For
+            End If
+
+
+            Dim x1 As Double = _
+                asLinksX
+
+
+            Dim x2 As Double
+
+            x2 = _
+                asLinksX + _
+                (tekenBreedte * _
+                (schouderPosities(grensIndex) / _
+                dataTotaleLengte))
+
+
+            Dim maatX As Double
+
+            maatX = _
+                (x1 + x2) / 2.0
+
+
+            Dim maatY As Double
+
+            maatY = _
+                eersteMaatY + _
+                (linkerMaatNummer * maatStap)
+
+
+            Dim tekstPunt As Inventor.Point2d
+
+            tekstPunt = _
+                tg.CreatePoint2d( _
+                    maatX, _
+                    maatY)
+
+
+            Try
+
+
+                Dim nieuweMaat As _
+                    Inventor.LinearGeneralDimension
+
+
+                nieuweMaat = _
+                    sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                        tekstPunt, _
+                        maatIntents(0), _
+                        maatIntents(grensIndex), _
+                        Inventor.DimensionTypeEnum.kHorizontalDimensionType)
+
+
+                nieuweMaat.ModelValueOverridden = True
+
+
+                nieuweMaat.OverrideModelValue = _
+                    schouderPosities(grensIndex) / 10.0
+
+
+                linkerMaatNummer += 1
+                aantalLengtematen += 1
+
+
+            Catch
+
+            End Try
+
+
+        Next
+
+
+
+        ' ====================================================
+        ' RECHTER CUMULATIEVE MATEN
+        ' ====================================================
+
+        Dim laatstePuntIndex As Integer
+
+        laatstePuntIndex = _
+            maatIntents.Count - 1
+
+
+        Dim rechterMaatNummer As Integer = 0
+
+
+        For grensIndex As Integer = _
+            laatstePuntIndex - 1 To _
+            laatsteMaxSectie + 1 Step -1
+
+
+            If maatIntents(laatstePuntIndex) Is Nothing Then
+                Continue For
+            End If
+
+
+            If maatIntents(grensIndex) Is Nothing Then
+                Continue For
+            End If
+
+
+            Dim x1 As Double
+
+            x1 = _
+                asLinksX + _
+                (tekenBreedte * _
+                (schouderPosities(grensIndex) / _
+                dataTotaleLengte))
+
+
+            Dim x2 As Double = _
+                asRechtsX
+
+
+            Dim maatX As Double
+
+            maatX = _
+                (x1 + x2) / 2.0
+
+
+            Dim maatY As Double
+
+            maatY = _
+                eersteMaatY + _
+                (rechterMaatNummer * maatStap)
+
+
+            Dim tekstPunt As Inventor.Point2d
+
+            tekstPunt = _
+                tg.CreatePoint2d( _
+                    maatX, _
+                    maatY)
+
+
+            Try
+
+
+                Dim nieuweMaat As _
+                    Inventor.LinearGeneralDimension
+
+
+                nieuweMaat = _
+                    sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                        tekstPunt, _
+                        maatIntents(grensIndex), _
+                        maatIntents(laatstePuntIndex), _
+                        Inventor.DimensionTypeEnum.kHorizontalDimensionType)
+
+
+                Dim echteMaatMM As Double
+
+                echteMaatMM = _
+                    dataTotaleLengte - _
+                    schouderPosities(grensIndex)
+
+
+                nieuweMaat.ModelValueOverridden = True
+
+
+                nieuweMaat.OverrideModelValue = _
+                    echteMaatMM / 10.0
+
+
+                rechterMaatNummer += 1
+                aantalLengtematen += 1
+
+
+            Catch
+
+            End Try
+
+
+        Next
+
+
+
+        ' ====================================================
+        ' TOTALE LENGTE
+        ' ====================================================
+
+        Dim hoogsteAantal As Integer
+
+        hoogsteAantal = _
+            Math.Max( _
+                linkerMaatNummer, _
+                rechterMaatNummer)
+
+
+        Dim totaalMaatY As Double
+
+        totaalMaatY = _
+            eersteMaatY + _
+            (hoogsteAantal * maatStap) + _
+            0.50
+
+
+        Dim totaalMaatX As Double
+
+        totaalMaatX = _
+            (asLinksX + asRechtsX) / 2.0
+
+
+        Dim totaalTekstPunt As Inventor.Point2d
+
+        totaalTekstPunt = _
+            tg.CreatePoint2d( _
+                totaalMaatX, _
+                totaalMaatY)
+
+
+        If maatIntents(0) IsNot Nothing AndAlso _
+           maatIntents(laatstePuntIndex) IsNot Nothing Then
+
+
+            Try
+
+
+                Dim totaalMaat As _
+                    Inventor.LinearGeneralDimension
+
+
+                totaalMaat = _
+                    sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                        totaalTekstPunt, _
+                        maatIntents(0), _
+                        maatIntents(laatstePuntIndex), _
+                        Inventor.DimensionTypeEnum.kHorizontalDimensionType)
+
+
+                totaalMaat.ModelValueOverridden = True
+
+
+                totaalMaat.OverrideModelValue = _
+                    dataTotaleLengte / 10.0
+
+
+                aantalLengtematen += 1
+
+
+            Catch
+
+            End Try
+
+
+        End If
+
+
+
+        ' ====================================================
+        ' 14. AUTOMATISCHE Ø-MATEN
+        ' ====================================================
+
+        Dim diameterSketch As Inventor.DrawingSketch
+
+        diameterSketch = _
+            sheet.Sketches.Add
+
+
+        diameterSketch.Name = _
+            "Rotoras Automatische Diametermaten"
+
+
+        diameterSketch.Edit()
+
+
+        Dim diameterBovenLijnen As _
+            New List(Of Inventor.SketchLine)
+
+
+        Dim diameterOnderLijnen As _
+            New List(Of Inventor.SketchLine)
+
+
+        Dim sectieBeginMM As Double = 0
+
+
+
+        ' ====================================================
+        ' HULPLIJNEN Ø-MATEN
+        ' ====================================================
+
+        For i As Integer = 0 To dwgDiameters.Count - 1
+
+
+            Dim sectieEindMM As Double
+
+            sectieEindMM = _
+                sectieBeginMM + _
+                dwgLengtes(i)
+
+
+            Dim sectieMiddenMM As Double
+
+            sectieMiddenMM = _
+                (sectieBeginMM + sectieEindMM) / 2.0
+
+
+            Dim xMidden As Double
+
+            xMidden = _
+                baseView.Left + _
+                (baseView.Width * _
+                (sectieMiddenMM / dataTotaleLengte))
+
+
+            Dim halveDiameterOpBlad As Double
+
+            halveDiameterOpBlad = _
+                ((dwgDiameters(i) / 10.0) * _
+                viewScale) / 2.0
+
+
+            Dim yBoven As Double
+
+            yBoven = _
+                baseView.Center.Y + _
+                halveDiameterOpBlad
+
+
+            Dim yOnder As Double
+
+            yOnder = _
+                baseView.Center.Y - _
+                halveDiameterOpBlad
+
+
+            Dim hulpHalfBreedte As Double = 0.10
+
+
+            Dim bovenP1 As Inventor.Point2d
+            Dim bovenP2 As Inventor.Point2d
+
+            Dim onderP1 As Inventor.Point2d
+            Dim onderP2 As Inventor.Point2d
+
+
+            bovenP1 = _
+                tg.CreatePoint2d( _
+                    xMidden - hulpHalfBreedte, _
+                    yBoven)
+
+
+            bovenP2 = _
+                tg.CreatePoint2d( _
+                    xMidden + hulpHalfBreedte, _
+                    yBoven)
+
+
+            onderP1 = _
+                tg.CreatePoint2d( _
+                    xMidden - hulpHalfBreedte, _
+                    yOnder)
+
+
+            onderP2 = _
+                tg.CreatePoint2d( _
+                    xMidden + hulpHalfBreedte, _
+                    yOnder)
+
+
+            Dim bovenLijn As Inventor.SketchLine
+            Dim onderLijn As Inventor.SketchLine
+
+
+            bovenLijn = _
+                diameterSketch.SketchLines.AddByTwoPoints( _
+                    bovenP1, _
+                    bovenP2)
+
+
+            onderLijn = _
+                diameterSketch.SketchLines.AddByTwoPoints( _
+                    onderP1, _
+                    onderP2)
+
+
+            Try
+                bovenLijn.Construction = True
+            Catch
+            End Try
+
+
+            Try
+                onderLijn.Construction = True
+            Catch
+            End Try
+
+
+            diameterBovenLijnen.Add( _
+                bovenLijn)
+
+
+            diameterOnderLijnen.Add( _
+                onderLijn)
+
+
+            sectieBeginMM = _
+                sectieEindMM
+
+
+        Next
+
+
+        diameterSketch.ExitEdit()
+
+
+
+      ' ====================================================
+' 15. Ø-MATEN PLAATSEN - RICHTINGGESTUURD
+' DWG GENERATOR v0.6.0
+' ====================================================
+'
+' LOGICA:
+' - Grootste aaneengesloten diametergebied = centrum.
+' - Links van centrum: klein -> groot richting centrum.
+'   Tekst staat links van maatlijn en loopt laag -> hoog.
+' - Rechts van centrum: groot -> klein richting aseinde.
+'   Tekst staat rechts van maatlijn en loopt hoog -> laag.
+' - Lokale groeven veranderen deze algemene richting niet.
+' - Alleen dicht bij elkaar staande maten vormen een cluster.
+'
+' ====================================================
+
+Dim basisOffset As Double = 0.45
+Dim niveauStap As Double = 0.40
+Dim clusterAfstand As Double = 1.50
+Dim tekstOffsetX As Double = 0.05
+
+' Posities van alle diametermaten voorbereiden
+Dim diameterX As New List(Of Double)
+Dim diameterBovenY As New List(Of Double)
+
+sectieBeginMM = 0
+
+For i As Integer = 0 To dwgDiameters.Count - 1
+
+    Dim sectieEindMM As Double
+    sectieEindMM = sectieBeginMM + dwgLengtes(i)
+
+    Dim sectieMiddenMM As Double
+    sectieMiddenMM = (sectieBeginMM + sectieEindMM) / 2.0
+
+    Dim xMidden As Double
+    xMidden = baseView.Left + _
+        (baseView.Width * (sectieMiddenMM / dataTotaleLengte))
+
+    diameterX.Add(xMidden)
+
+    Dim halveDiameterOpBlad As Double
+    halveDiameterOpBlad = _
+        ((dwgDiameters(i) / 10.0) * viewScale) / 2.0
+
+    diameterBovenY.Add( _
+        baseView.Center.Y + halveDiameterOpBlad)
+
+    sectieBeginMM = sectieEindMM
+
+Next
+
+' Centrum is het eerder bepaalde aaneengesloten gebied
+' met de grootste diameter.
+Dim centrumLinksIndex As Integer = eersteMaxSectie
+Dim centrumRechtsIndex As Integer = laatsteMaxSectie
+
+If centrumLinksIndex < 0 Then centrumLinksIndex = 0
+If centrumRechtsIndex < centrumLinksIndex Then _
+    centrumRechtsIndex = centrumLinksIndex
+
+' ----------------------------------------------------
+' CLUSTERS BEPALEN
+'
+' Een cluster bestaat uit opeenvolgende maatlijnen die
+' onderling dicht genoeg bij elkaar liggen.
+' ----------------------------------------------------
+Dim clusterStart As New List(Of Integer)
+Dim clusterEind As New List(Of Integer)
+
+If diameterX.Count > 0 Then
+
+    Dim startIndex As Integer = 0
+
+    For i As Integer = 1 To diameterX.Count - 1
+
+        If Math.Abs(diameterX(i) - diameterX(i - 1)) > clusterAfstand Then
+
+            clusterStart.Add(startIndex)
+            clusterEind.Add(i - 1)
+            startIndex = i
+
+        End If
+
+    Next
+
+    clusterStart.Add(startIndex)
+    clusterEind.Add(diameterX.Count - 1)
+
+End If
+
+' Voor iedere sectie bewaren we het niveau.
+Dim diameterNiveau As New List(Of Integer)
+
+For i As Integer = 0 To dwgDiameters.Count - 1
+    diameterNiveau.Add(0)
+Next
+
+' ----------------------------------------------------
+' NIVEAUS PER CLUSTER
+' ----------------------------------------------------
+For c As Integer = 0 To clusterStart.Count - 1
+
+    Dim cStart As Integer = clusterStart(c)
+    Dim cEind As Integer = clusterEind(c)
+    Dim cAantal As Integer = cEind - cStart + 1
+
+    If cAantal <= 1 Then
+        diameterNiveau(cStart) = 0
+        Continue For
+    End If
+
+    ' Cluster volledig links van het centrum:
+    ' van links naar rechts laag -> hoog.
+    If cEind < centrumLinksIndex Then
+
+        For i As Integer = cStart To cEind
+            diameterNiveau(i) = i - cStart
+        Next
+
+    ' Cluster volledig rechts van het centrum:
+    ' van links naar rechts hoog -> laag.
+    ElseIf cStart > centrumRechtsIndex Then
+
+        For i As Integer = cStart To cEind
+            diameterNiveau(i) = cEind - i
+        Next
+
+    Else
+
+        ' Cluster raakt het centrum.
+        ' Links loopt op naar centrum, rechts loopt af.
+        For i As Integer = cStart To cEind
+
+            If i < centrumLinksIndex Then
+                diameterNiveau(i) = _
+                    centrumLinksIndex - i
+            ElseIf i > centrumRechtsIndex Then
+                diameterNiveau(i) = _
+                    i - centrumRechtsIndex
+            Else
+                ' Centrale grootste sectie(s) hoogste.
+                Dim linksAantal As Integer = _
+                    Math.Max(0, centrumLinksIndex - cStart)
+                Dim rechtsAantal As Integer = _
+                    Math.Max(0, cEind - centrumRechtsIndex)
+                diameterNiveau(i) = _
+                    Math.Max(linksAantal, rechtsAantal)
+            End If
+
+        Next
+
+        ' Bij een centrumcluster willen we juist:
+        ' laag aan de buitenzijde en hoog bij het centrum.
+        Dim maxNiveauCluster As Integer = 0
+        For i As Integer = cStart To cEind
+            If diameterNiveau(i) > maxNiveauCluster Then
+                maxNiveauCluster = diameterNiveau(i)
+            End If
+        Next
+
+        For i As Integer = cStart To cEind
+            If i < centrumLinksIndex Then
+                diameterNiveau(i) = i - cStart
+            ElseIf i > centrumRechtsIndex Then
+                diameterNiveau(i) = cEind - i
+            Else
+                diameterNiveau(i) = _
+                    Math.Max(centrumLinksIndex - cStart, _
+                             cEind - centrumRechtsIndex)
+            End If
+        Next
+
+    End If
+
+Next
+
+' ----------------------------------------------------
+' Ø-MATEN PLAATSEN
+' ----------------------------------------------------
+sectieBeginMM = 0
+
+For i As Integer = 0 To dwgDiameters.Count - 1
+
+    Dim bovenIntent As Inventor.GeometryIntent = Nothing
+    Dim onderIntent As Inventor.GeometryIntent = Nothing
+
+    Try
+        bovenIntent = _
+            sheet.CreateGeometryIntent(diameterBovenLijnen(i))
+    Catch
+    End Try
+
+    Try
+        onderIntent = _
+            sheet.CreateGeometryIntent(diameterOnderLijnen(i))
+    Catch
+    End Try
+
+    If bovenIntent Is Nothing OrElse onderIntent Is Nothing Then
+        sectieBeginMM += dwgLengtes(i)
+        Continue For
+    End If
+
+    Dim xMidden As Double = diameterX(i)
+    Dim bovenY As Double = diameterBovenY(i)
+
+    Dim isLinks As Boolean = (i < centrumLinksIndex)
+    Dim isRechts As Boolean = (i > centrumRechtsIndex)
+    Dim isCentrum As Boolean = Not isLinks AndAlso Not isRechts
+
+    Dim tekstY As Double
+    tekstY = bovenY + basisOffset + _
+        (diameterNiveau(i) * niveauStap)
+
+    Dim tekstX As Double
+
+    If isLinks Then
+        ' Tekst links van de verticale maatlijn.
+        tekstX = xMidden - tekstOffsetX
+    ElseIf isRechts Then
+        ' Tekst rechts van de verticale maatlijn.
+        tekstX = xMidden + tekstOffsetX
+    Else
+        tekstX = xMidden
+    End If
+
+    Dim tekstPunt As Inventor.Point2d
+    tekstPunt = tg.CreatePoint2d(tekstX, tekstY)
+
+    ' =================================================
+    ' DRAADSECTIE?
+    ' =================================================
+    '
+    ' Bij draad maken we GEEN Ø-maat.
+    ' We plaatsen alleen de draadaanduiding, bijvoorbeeld M12.
+    ' =================================================
+
+    Dim isDraadSectie As Boolean = False
+    Dim draadAanduiding As String = ""
+
+    If i < dwgDraad.Count Then
+
+        draadAanduiding = dwgDraad(i).Trim()
+
+        If draadAanduiding <> "" Then
+            isDraadSectie = True
+        End If
+
+    End If
+
+
+    ' Ook bij draad maken we de normale verticale maat.
+    ' Daardoor blijven maatlijn, tekstpositie en links/rechts-
+    ' uitlijning identiek aan de gewone diametermaten.
+
+    Try
+
+        Dim diameterMaat As Inventor.LinearGeneralDimension
+
+        diameterMaat = _
+            sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                tekstPunt, _
+                bovenIntent, _
+                onderIntent, _
+                Inventor.DimensionTypeEnum.kVerticalDimensionType)
+
+        ' Echte nominale diameter
+        diameterMaat.ModelValueOverridden = True
+        diameterMaat.OverrideModelValue = dwgDiameters(i) / 10.0
+
+
+        ' Standaard maatweergave: 2 decimalen, trailing zero's uit.
+        ' Toleranties/passingen: 3 decimalen, trailing zero's aan.
+        Try
+            diameterMaat.Precision = 2
+            diameterMaat.TolerancePrecision = 3
+            diameterMaat.Style.TrailingZeroDisplay = False
+            diameterMaat.Style.ToleranceTrailingZeroDisplay = True
+            diameterMaat.Style.ToleranceLinearPrecision = 3
+        Catch
+        End Try
+
+        ' Eventuele ISO-aspassing uit Excel toepassen als echte Inventor Fits-tolerantie.
+        Dim heeftPassing As Boolean = False
+
+        If Not isDraadSectie AndAlso i < dwgPassingen.Count Then
+            Dim passingAanduiding As String = dwgPassingen(i).Trim()
+            If passingAanduiding <> "" Then
+                Try
+                    diameterMaat.Tolerance.SetToFits( _
+                        Inventor.ToleranceTypeEnum.kLimitsFitsShowTolerance, _
+                        "", _
+                        passingAanduiding)
+                    diameterMaat.TolerancePrecision = 3
+                    heeftPassing = True
+                Catch exPassing As Exception
+                    MessageBox.Show( _
+                        "Passing '" & passingAanduiding & "' kon niet worden toegepast op Ø" & _
+                        dwgDiameters(i).ToString("0.##") & "." & vbCrLf & _
+                        exPassing.Message, _
+                        "Rotoras DWG Generator")
+                End Try
+            End If
+        End If
+
+        ' Weergavetekst:
+        ' gewone sectie = Ø + maatwaarde
+        ' draadsectie   = draadaanduiding, bijvoorbeeld M12
+        Try
+
+            If isDraadSectie Then
+
+                ' Nominale maatwaarde (bijv. 12.00) verbergen.
+                ' Alleen de draadaanduiding blijft zichtbaar.
+                Try
+                    diameterMaat.HideValue = True
+                Catch
+                End Try
+
+                diameterMaat.Text.FormattedText = _
+                    draadAanduiding
+
+            Else
+
+                diameterMaat.Text.FormattedText = _
+                    "Ø<DimensionValue/>"
+
+            End If
+
+        Catch
+        End Try
+
+        ' Tekst horizontaal
+        Try
+            diameterMaat.Style.VerticalDimensionTextOrientation = _
+                Inventor.DimensionTextOrientationEnum.kInlineHorizontalDimensionText
+        Catch
+        End Try
+
+        ' Uitlijning afhankelijk van zijde van de as
+        If isLinks Then
+
+            ' Klein -> groot:
+            ' tekst eindigt bij de maatlijn en staat links.
+            Try
+                diameterMaat.Text.HorizontalJustification = _
+                    Inventor.HorizontalTextAlignmentEnum.kAlignTextRight
+            Catch
+            End Try
+
+        ElseIf isRechts Then
+
+            ' Groot -> klein:
+            ' tekst begint bij de maatlijn en staat rechts.
+            Try
+                diameterMaat.Text.HorizontalJustification = _
+                    Inventor.HorizontalTextAlignmentEnum.kAlignTextLeft
+            Catch
+            End Try
+
+        Else
+
+            Try
+                diameterMaat.Text.HorizontalJustification = _
+                    Inventor.HorizontalTextAlignmentEnum.kAlignTextCenter
+            Catch
+            End Try
+
+        End If
+
+        ' Definitieve tekstpositie.
+        ' Diameter met passing krijgt extra hoogte omdat de passing/tolerantie
+        ' meerdere tekstregels gebruikt en anders tegen naburige maten komt.
+        Dim definitieveTekstY As Double
+        definitieveTekstY = tekstY
+        If isDraadSectie Then
+            ' Houd ook rekening met grotere vlakken naast de draad.
+            Dim draadVrijDiameter As Double = dwgDiameters(i)
+            If i > 0 Then draadVrijDiameter = Math.Max(draadVrijDiameter, dwgDiameters(i - 1))
+            If i + 1 < dwgDiameters.Count Then draadVrijDiameter = Math.Max(draadVrijDiameter, dwgDiameters(i + 1))
+            definitieveTekstY = Math.Max(tekstY, baseView.Center.Y + draadVrijDiameter * viewScale / 20.0 + basisOffset + diameterNiveau(i) * niveauStap + 0.5)
+        End If
+
+        If heeftPassing Then
+            definitieveTekstY += 1.8   ' 18 mm extra omhoog op het tekenblad
+        End If
+
+        Try
+            diameterMaat.Text.Origin = _
+                tg.CreatePoint2d(tekstX, definitieveTekstY)
+        Catch
+        End Try
+
+
+        ' =================================================
+        ' RONDLOOP 0,02 T.O.V. DATUM A BIJ PASSINGSMATEN
+        ' =================================================
+        ' Alleen secties met een echte passing krijgen een FCF.
+        ' Het kader wordt onder de betreffende diameter geplaatst
+        ' en met een leader aan die diameter gekoppeld.
+        ' =================================================
+
+        If heeftPassing Then
+            Try
+                Dim fcfRows As Inventor.FeatureControlFrameRows
+                fcfRows = sheet.FeatureControlFrames.CreateFeatureControlFrameRows
+
+                fcfRows.Add( _
+                    Inventor.GeometricCharacteristicEnum.kCircularRunout, _
+                    "0,02", _
+                    "", _
+                    "A")
+
+                Dim fcfLeaderPoints As Inventor.ObjectCollection
+                fcfLeaderPoints = invApp.TransientObjects.CreateObjectCollection
+
+                ' Plaats het tolerantiekader onder de as.
+                ' Een kleine links/rechts verschuiving houdt het kader
+                ' uit de buurt van de verticale diametermaat.
+                Dim fcfX As Double
+                If isLinks Then
+                    fcfX = xMidden - 0.85
+                ElseIf isRechts Then
+                    fcfX = xMidden + 0.85
+                Else
+                    fcfX = xMidden + 0.85
+                End If
+
+                Dim fcfY As Double
+                ' Onderzijde lokaal opnieuw berekenen; er bestaat geen diameterOnderY-array.
+                Dim fcfLokaleHalveDiameter As Double
+                fcfLokaleHalveDiameter = ((dwgDiameters(i) / 10.0) * viewScale) / 2.0
+                fcfY = (baseView.Center.Y - fcfLokaleHalveDiameter) - 1.55
+
+                ' Minimaal 5 mm boven het daadwerkelijke tekstblok.
+                If sheet.TitleBlock IsNot Nothing Then
+                    fcfY = Math.Max(fcfY, sheet.TitleBlock.RangeBox.MaxPoint.Y + 0.5)
+                End If
+                fcfLeaderPoints.Add(tg.CreatePoint2d(fcfX, fcfY))
+
+                ' Leader koppelen aan de onderzijde van de passingsdiameter.
+                Dim fcfIntent As Inventor.GeometryIntent
+                fcfIntent = sheet.CreateGeometryIntent(diameterOnderLijnen(i))
+                fcfLeaderPoints.Add(fcfIntent)
+
+                sheet.FeatureControlFrames.Add( _
+                    fcfLeaderPoints, _
+                    fcfRows)
+
+            Catch
+                ' Een FCF-fout mag de rest van de DWG niet stoppen.
+            End Try
+        End If
+
+        aantalDiametermaten += 1
+
+    Catch
+    End Try
+
+    sectieBeginMM += dwgLengtes(i)
+
+Next
+
+
+        ' ====================================================
+        ' 16. AUTOMATISCHE SPIEBAANMAATVOERING
+        ' ====================================================
+        '
+        ' SpieDiepte is in de Rotoras Generator de absolute
+        ' bodemdiameter. De werkelijke radiale diepte is:
+        ' (lokale asdiameter - bodemdiameter) / 2.
+        '
+        ' Lengte krijgt standaard +0,3.
+        ' Maten worden onder de doorsnede A-A geplaatst.
+        ' ====================================================
+
+        Dim aantalSpiebaanMaten As Integer = 0
+
+        For i As Integer = 0 To dwgSpieLengte.Count - 1
+
+            If dwgSpieLengte(i) <= 0 Then Continue For
+
+            Dim sbBeginMM As Double = dwgSpieBegin(i)
+            Dim sbLengteMM As Double = dwgSpieLengte(i)
+            Dim sbEindMM As Double = sbBeginMM + sbLengteMM
+            Dim sbBodemDMM As Double = dwgSpieDiepte(i)
+
+            ' Lokale buitendiameter op het beginpunt bepalen.
+            Dim lokaleDiameterMM As Double = 0
+            Dim zoekPosMM As Double = 0
+
+            For j As Integer = 0 To dwgLengtes.Count - 1
+
+                Dim zoekEindMM As Double = zoekPosMM + dwgLengtes(j)
+
+                If sbBeginMM >= zoekPosMM - 0.0001 AndAlso _
+                   sbBeginMM <= zoekEindMM + 0.0001 Then
+
+                    lokaleDiameterMM = dwgDiameters(j)
+                    Exit For
+                End If
+
+                zoekPosMM = zoekEindMM
+            Next
+
+            If lokaleDiameterMM <= 0 OrElse sbBodemDMM <= 0 Then Continue For
+
+            Dim sbRadialeDiepteMM As Double
+            sbRadialeDiepteMM = (lokaleDiameterMM - sbBodemDMM) / 2.0
+
+            If sbRadialeDiepteMM <= 0 Then Continue For
+
+            ' Posities op de section view.
+            Dim sbStartX As Double
+            Dim sbEindX As Double
+            Dim sbMiddenX As Double
+
+            sbStartX = asLinksX + _
+                (tekenBreedte * (sbBeginMM / dataTotaleLengte))
+
+            sbEindX = asLinksX + _
+                (tekenBreedte * (sbEindMM / dataTotaleLengte))
+
+            sbMiddenX = (sbStartX + sbEindX) / 2.0
+
+            Dim sbLengteY As Double
+            sbLengteY = (sectionView.Center.Y - (sectionView.Height / 2.0)) - 0.75
+
+            ' Positie van de spiebaandieptemaat vooraf bepalen.
+            ' Buitenste spiebanen: maat echt BUITEN de spiebaan zetten.
+            ' Middelste spiebanen: bestaande normale positie behouden.
+            Dim sbDiepteX As Double
+            Dim sbMiddenPosMM As Double = (sbBeginMM + sbEindMM) / 2.0
+
+            If sbMiddenPosMM < (dataTotaleLengte / 3.0) Then
+                ' Linker buitenste spiebaan: maat volledig links buiten de rotoras.
+                sbDiepteX = asLinksX - 0.65
+            ElseIf sbMiddenPosMM > (dataTotaleLengte * 2.0 / 3.0) Then
+                ' Rechter buitenste spiebaan: maat volledig rechts buiten de rotoras.
+                sbDiepteX = (asLinksX + tekenBreedte) + 0.65
+            Else
+                ' Eventuele spiebaan in het midden blijft normaal bemaat.
+                sbDiepteX = sbMiddenX + 0.35
+            End If
+
+            ' Helper sketch voor model-onafhankelijke, maar
+            ' correct overschreven maatwaarden.
+            Dim sbMaatSketch As Inventor.DrawingSketch
+            sbMaatSketch = sheet.Sketches.Add
+            sbMaatSketch.Name = "Rotoras Spiebaanmaten " & (i + 1)
+            sbMaatSketch.Edit()
+
+            Dim sbStartLijn As Inventor.SketchLine
+            Dim sbEindLijn As Inventor.SketchLine
+
+            sbStartLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                tg.CreatePoint2d(sbStartX, sectionView.Center.Y - 0.10), _
+                tg.CreatePoint2d(sbStartX, sectionView.Center.Y + 0.10))
+
+            sbEindLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                tg.CreatePoint2d(sbEindX, sectionView.Center.Y - 0.10), _
+                tg.CreatePoint2d(sbEindX, sectionView.Center.Y + 0.10))
+
+            ' Diepte aan de onderzijde van de doorsnede.
+            Dim lokaleRadiusBlad As Double
+            lokaleRadiusBlad = ((lokaleDiameterMM / 10.0) * viewScale) / 2.0
+
+            Dim bodemRadiusBlad As Double
+            bodemRadiusBlad = ((sbBodemDMM / 10.0) * viewScale) / 2.0
+
+            Dim oppervlakY As Double
+            Dim bodemY As Double
+
+            oppervlakY = sectionView.Center.Y - lokaleRadiusBlad
+            bodemY = sectionView.Center.Y - bodemRadiusBlad
+
+            Dim sbOppervlakLijn As Inventor.SketchLine
+            Dim sbBodemLijn As Inventor.SketchLine
+
+            ' Referentielijnen voor de spiebaandiepte.
+            ' Bij buitenste spiebanen door laten lopen vanaf de maat buiten
+            ' het werkstuk tot aan de daadwerkelijke spiebaan, zodat duidelijk
+            ' zichtbaar is tussen welke twee niveaus de diepte geldt.
+            If sbMiddenPosMM < (dataTotaleLengte / 3.0) Then
+                sbOppervlakLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(sbDiepteX, oppervlakY), _
+                    tg.CreatePoint2d(sbMiddenX + 0.10, oppervlakY))
+                sbBodemLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(sbDiepteX, bodemY), _
+                    tg.CreatePoint2d(sbMiddenX + 0.10, bodemY))
+
+            ElseIf sbMiddenPosMM > (dataTotaleLengte * 2.0 / 3.0) Then
+                sbOppervlakLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(sbMiddenX - 0.10, oppervlakY), _
+                    tg.CreatePoint2d(sbDiepteX, oppervlakY))
+                sbBodemLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(sbMiddenX - 0.10, bodemY), _
+                    tg.CreatePoint2d(sbDiepteX, bodemY))
+
+            Else
+                sbOppervlakLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(sbMiddenX - 0.10, oppervlakY), _
+                    tg.CreatePoint2d(sbMiddenX + 0.10, oppervlakY))
+                sbBodemLijn = sbMaatSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(sbMiddenX - 0.10, bodemY), _
+                    tg.CreatePoint2d(sbMiddenX + 0.10, bodemY))
+            End If
+
+            Try
+                sbStartLijn.Construction = True
+                sbEindLijn.Construction = True
+                sbOppervlakLijn.Construction = True
+                sbBodemLijn.Construction = True
+            Catch
+            End Try
+
+            sbMaatSketch.ExitEdit()
+
+            ' Spiebaanlengte
+            Try
+                Dim sbStartIntent As Inventor.GeometryIntent
+                Dim sbEindIntent As Inventor.GeometryIntent
+
+                sbStartIntent = sheet.CreateGeometryIntent(sbStartLijn)
+                sbEindIntent = sheet.CreateGeometryIntent(sbEindLijn)
+
+                Dim sbLengteMaat As Inventor.LinearGeneralDimension
+
+                sbLengteMaat = _
+                    sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                        tg.CreatePoint2d(sbMiddenX, sbLengteY), _
+                        sbStartIntent, sbEindIntent, _
+                        Inventor.DimensionTypeEnum.kHorizontalDimensionType)
+
+                sbLengteMaat.ModelValueOverridden = True
+                sbLengteMaat.OverrideModelValue = sbLengteMM / 10.0
+
+                Try
+                    sbLengteMaat.Text.FormattedText = _
+                        "<DimensionValue/> +0,3"
+                Catch
+                End Try
+
+                aantalSpiebaanMaten += 1
+            Catch
+            End Try
+
+            ' Spiebaandiepte
+            Try
+                Dim sbOppervlakIntent As Inventor.GeometryIntent
+                Dim sbBodemIntent As Inventor.GeometryIntent
+
+                sbOppervlakIntent = sheet.CreateGeometryIntent(sbOppervlakLijn)
+                sbBodemIntent = sheet.CreateGeometryIntent(sbBodemLijn)
+
+                Dim sbDiepteMaat As Inventor.LinearGeneralDimension
+
+                sbDiepteMaat = _
+                    sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                        tg.CreatePoint2d(sbDiepteX, _
+                            (oppervlakY + bodemY) / 2.0), _
+                        sbOppervlakIntent, sbBodemIntent, _
+                        Inventor.DimensionTypeEnum.kVerticalDimensionType)
+
+                sbDiepteMaat.ModelValueOverridden = True
+                sbDiepteMaat.OverrideModelValue = sbRadialeDiepteMM / 10.0
+
+                ' Buitenste spiebanen: tekst niet in/boven het werkstuk laten staan.
+                ' De maatlijn blijft links/rechts buiten de spiebaan; de tekst wordt
+                ' onder de doorsnede gezet. Een middelste spiebaan blijft normaal.
+                Try
+                    sbDiepteMaat.Text.Origin = _
+                        tg.CreatePoint2d(sbDiepteX, (oppervlakY + bodemY) / 2.0)
+                Catch
+                End Try
+
+                aantalSpiebaanMaten += 1
+            Catch
+            End Try
+
+            ' Spiebaanbreedte - bematen in het ONDERSTE TOP VIEW.
+            ' In de langsdoorsnede is de breedte niet geometrisch zichtbaar.
+            If i < dwgSpieBreedte.Count AndAlso dwgSpieBreedte(i) > 0 Then
+                Try
+                    Dim sbBreedteMM As Double
+                    sbBreedteMM = dwgSpieBreedte(i)
+
+                    ' X-positie van het midden van de spiebaan in het onderste aanzicht.
+                    Dim sbBreedteX As Double
+                    sbBreedteX = baseView.Left + _
+                        (baseView.Width * ((sbBeginMM + (sbLengteMM / 2.0)) / dataTotaleLengte))
+
+                    ' Nominale spiebaanbreedte omgerekend naar papiermaat.
+                    Dim sbHalveBreedteBlad As Double
+                    sbHalveBreedteBlad = ((sbBreedteMM / 10.0) * viewScale) / 2.0
+
+                    Dim sbBreedteSketch As Inventor.DrawingSketch
+                    sbBreedteSketch = sheet.Sketches.Add
+                    sbBreedteSketch.Name = "Rotoras Spiebaanbreedte Top " & (i + 1)
+                    sbBreedteSketch.Edit()
+
+                    Dim sbBreedteOnderLijn As Inventor.SketchLine
+                    Dim sbBreedteBovenLijn As Inventor.SketchLine
+
+                    sbBreedteOnderLijn = sbBreedteSketch.SketchLines.AddByTwoPoints( _
+                        tg.CreatePoint2d(sbBreedteX - 0.10, baseView.Center.Y - sbHalveBreedteBlad), _
+                        tg.CreatePoint2d(sbBreedteX + 0.10, baseView.Center.Y - sbHalveBreedteBlad))
+
+                    sbBreedteBovenLijn = sbBreedteSketch.SketchLines.AddByTwoPoints( _
+                        tg.CreatePoint2d(sbBreedteX - 0.10, baseView.Center.Y + sbHalveBreedteBlad), _
+                        tg.CreatePoint2d(sbBreedteX + 0.10, baseView.Center.Y + sbHalveBreedteBlad))
+
+                    Try
+                        sbBreedteOnderLijn.Construction = True
+                        sbBreedteBovenLijn.Construction = True
+                    Catch
+                    End Try
+
+                    sbBreedteSketch.ExitEdit()
+
+                    Dim sbBreedteOnderIntent As Inventor.GeometryIntent
+                    Dim sbBreedteBovenIntent As Inventor.GeometryIntent
+                    sbBreedteOnderIntent = sheet.CreateGeometryIntent(sbBreedteOnderLijn)
+                    sbBreedteBovenIntent = sheet.CreateGeometryIntent(sbBreedteBovenLijn)
+
+                    Dim sbBreedteMaat As Inventor.LinearGeneralDimension
+
+                    ' Spiebaanbreedte exact in het midden van de spiebaan.
+                    ' De tekst komt onder de rotoras op een afstand die gelijk is
+                    ' aan de lokale asdiameter op de positie van de spiebaan.
+                    Dim sbBreedteMaatX As Double
+                    ' Niet exact in het midden: op 3/4 van de spiebaanlengte
+                    ' vanaf het beginpunt, zodat de maatlijn niet botst met
+                    ' de diametermaat aan de andere zijde van de as.
+                    sbBreedteMaatX = baseView.Left + _
+                        (baseView.Width * ((sbBeginMM + (sbLengteMM * 0.75)) / dataTotaleLengte))
+
+                    ' Lokale diameter omrekenen naar papierafstand.
+                    ' Voorbeeld: Ø30 bij schaal 1:1 = 30 mm onder de onderrand.
+                    Dim sbAfstandOnderAs As Double
+                    sbAfstandOnderAs = (lokaleDiameterMM / 10.0) * viewScale
+
+                    sbBreedteMaat = _
+                        sheet.DrawingDimensions.GeneralDimensions.AddLinear( _
+                            tg.CreatePoint2d(sbBreedteMaatX, _
+                                baseView.Center.Y - (((lokaleDiameterMM / 10.0) * viewScale))), _
+                            sbBreedteOnderIntent, _
+                            sbBreedteBovenIntent, _
+                            Inventor.DimensionTypeEnum.kVerticalDimensionType)
+
+                    sbBreedteMaat.ModelValueOverridden = True
+                    sbBreedteMaat.OverrideModelValue = sbBreedteMM / 10.0
+
+                    ' Spiebaanbreedte standaard als echte ISO passing N9.
+                    ' N = gat-/inwendige passing; de tolerantie wordt door Inventor
+                    ' uit de nominale spiebaanbreedte bepaald.
+                    Try
+                        sbBreedteMaat.Precision = 2
+                        sbBreedteMaat.TolerancePrecision = 3
+                        sbBreedteMaat.Style.TrailingZeroDisplay = False
+                        sbBreedteMaat.Style.ToleranceTrailingZeroDisplay = True
+                        sbBreedteMaat.Style.ToleranceLinearPrecision = 3
+
+                        sbBreedteMaat.Tolerance.SetToFits( _
+                            Inventor.ToleranceTypeEnum.kLimitsFitsShowTolerance, _
+                            "N9", _
+                            "")
+
+                        sbBreedteMaat.TolerancePrecision = 3
+                    Catch
+                    End Try
+
+                    ' De maat blijft een echte Inventor-maat: waarde + maatlijn blijven
+                    ' gekoppeld en zichtbaar. Plaats de volledige maatlijn onder de as.
+                    '
+                    ' Gewenste afstand:
+                    ' onderzijde rotoras -> maatlijn = 1/2 van de lokale asdiameter.
+                    Dim sbLokaleRadiusBlad As Double
+                    sbLokaleRadiusBlad = ((lokaleDiameterMM / 10.0) * viewScale) / 2.0
+
+                    Dim sbLokaleOnderkantY As Double
+                    sbLokaleOnderkantY = baseView.Center.Y - sbLokaleRadiusBlad
+
+                    Dim sbHalveDiameterAfstand As Double
+                    sbHalveDiameterAfstand = ((lokaleDiameterMM / 10.0) * viewScale) / 2.0
+
+                    Dim sbMaatlijnY As Double
+                    sbMaatlijnY = sbLokaleOnderkantY - sbHalveDiameterAfstand
+
+                    ' Voor een echte verticale maat bepaalt de X-positie waar de
+                    ' verticale maatlijn staat. Daarna verplaatsen we de tekst naar
+                    ' het berekende Y-niveau; de native maatlijn blijft doorlopen.
+                    Try
+                        sbBreedteMaat.Text.Origin = _
+                            tg.CreatePoint2d(sbBreedteX, sbMaatlijnY)
+                    Catch
+                    End Try
+
+                    ' Native waarde weer expliciet zichtbaar.
+                    Try
+                        sbBreedteMaat.HideValue = False
+                    Catch
+                    End Try
+
+                    Try
+                        sbBreedteMaat.Precision = 2
+                        sbBreedteMaat.Style.TrailingZeroDisplay = False
+                    Catch
+                    End Try
+
+                    aantalSpiebaanMaten += 1
+                Catch
+                End Try
+            End If
+
+        Next
+
+
+        ' ====================================================
+        ' 16B. RADIUSOVERGANGEN + DIN509-E RADIUS AANDUIDEN
+        ' ====================================================
+        ' Betrouwbare leader-notes in plaats van zoeken naar een
+        ' native boog in de section view. Hierdoor wordt iedere
+        ' opgegeven Radius en iedere DIN509-E altijd aangeduid.
+        ' ====================================================
+
+        ' Gereserveerde tekstvakken (blad-eenheden: cm), gedeeld door radius en afschuining.
+        Dim randTekstVakken As New List(Of Double())
+        Try
+            Dim radiusCumulatiefMM As Double = 0.0
+            Dim radiusNummer As Integer = 0
+
+            For i As Integer = 0 To dwgLengtes.Count - 2
+                radiusCumulatiefMM += dwgLengtes(i)
+
+                Dim overgangSoort As String = ""
+                If i < dwgOvergangen.Count Then
+                    overgangSoort = dwgOvergangen(i).Trim().ToLower()
+                End If
+
+                Dim radiusMM As Double = 0
+                If i < dwgRadii.Count Then radiusMM = dwgRadii(i)
+
+                Dim isGewoneRadius As Boolean = _
+                    (overgangSoort = "radius" OrElse overgangSoort = "r")
+                Dim isDIN509Radius As Boolean = _
+                    (overgangSoort = "din509e" OrElse overgangSoort = "din509-e")
+
+                If (isGewoneRadius OrElse isDIN509Radius) AndAlso radiusMM > 0 Then
+
+                    Dim radX As Double
+                    radX = asLinksX + _
+                        (tekenBreedte * (radiusCumulatiefMM / dataTotaleLengte))
+
+                    ' Pijlpunt aan de onderzijde van de overgang.
+                    Dim radKleineD As Double
+                    radKleineD = Math.Min(dwgDiameters(i), dwgDiameters(i + 1))
+
+                    Dim radY As Double
+                    radY = sectionView.Center.Y - _
+                        (((radKleineD / 10.0) * viewScale) / 2.0)
+
+                    ' Bij DIN509-E ligt de radius iets naast de nominale schouder.
+                    If isDIN509Radius Then
+                        If dwgDiameters(i) < dwgDiameters(i + 1) Then
+                            radX = radX + ((radiusMM / 10.0) * viewScale)
+                        Else
+                            radX = radX - ((radiusMM / 10.0) * viewScale)
+                        End If
+                    End If
+
+                    ' Zoek de echte boog in de doorsnede, met dezelfde radius en bij deze schouder.
+                    Dim radBoog As Inventor.DrawingCurve = Nothing
+                    Dim radBesteAfstand As Double = Double.MaxValue
+                    Dim radBladRadius As Double = radiusMM / 10.0 * viewScale
+                    For Each radKandidaat As Inventor.DrawingCurve In sectionView.DrawingCurves
+                        Try
+                            Dim radMidden As Inventor.Point2d = radKandidaat.MidPoint
+                            Dim radCentrum As Inventor.Point2d = radKandidaat.CenterPoint
+                            If radMidden IsNot Nothing AndAlso radCentrum IsNot Nothing AndAlso radKandidaat.StartPoint IsNot Nothing Then
+                                Dim radGemeten As Double = radMidden.DistanceTo(radCentrum)
+                                Dim radAfstand As Double = radMidden.DistanceTo(tg.CreatePoint2d(radX, radY))
+                                If radMidden.Y < sectionView.Center.Y AndAlso _
+                                    Math.Abs(radGemeten - radBladRadius) < Math.Max(0.002, radBladRadius * 0.05) AndAlso _
+                                    radAfstand < Math.Max(0.08, radBladRadius * 2.5) AndAlso radAfstand < radBesteAfstand Then
+                                    radBesteAfstand = radAfstand
+                                    radBoog = radKandidaat
+                                End If
+                            End If
+                        Catch
+                            ' Rechte lijnen hebben geen centrum; alleen bogen komen in aanmerking.
+                        End Try
+                    Next
+
+                    Dim radIntent As Inventor.GeometryIntent
+                    If radBoog IsNot Nothing Then
+                        radX = radBoog.MidPoint.X
+                        radY = radBoog.MidPoint.Y
+                        radIntent = sheet.CreateGeometryIntent(radBoog, Inventor.PointIntentEnum.kMidPointIntent)
+                    Else
+                        ' Terugval voor niet als boog beschikbare projecties: midden van gewone fillet.
+                        If isGewoneRadius Then
+                            Dim radRichting As Double = If(dwgDiameters(i) < dwgDiameters(i + 1), 1.0, -1.0)
+                            radX -= radRichting * radBladRadius * (1.0 - Math.Sqrt(0.5))
+                            radY -= radBladRadius * (1.0 - Math.Sqrt(0.5))
+                        End If
+                        Dim radSketch As Inventor.DrawingSketch = sheet.Sketches.Add
+                        radSketch.Name = "Rotoras Radius helper " & (i + 1)
+                        radSketch.Edit()
+                        Dim radHelper As Inventor.SketchLine = radSketch.SketchLines.AddByTwoPoints( _
+                            tg.CreatePoint2d(radX - 0.03, radY), tg.CreatePoint2d(radX + 0.03, radY))
+                        radHelper.Construction = True
+                        radSketch.ExitEdit()
+                        radIntent = sheet.CreateGeometryIntent(radHelper)
+                    End If
+
+                    radiusNummer += 1
+
+                    ' Tekst onder de doorsnede, zoals op de voorbeeldtekening.
+                    Dim radNoteX As Double
+                    Dim radNoteY As Double
+
+                    If dwgDiameters(i) <= dwgDiameters(i + 1) Then
+                        radNoteX = radX - 0.85
+                    Else
+                        radNoteX = radX + 0.85
+                    End If
+
+                    radNoteY = radY - 0.55 - _
+                        (((radiusNummer - 1) Mod 2) * 0.35)
+
+                    Dim radLeaderPoints As Inventor.ObjectCollection
+                    radLeaderPoints = invApp.TransientObjects.CreateObjectCollection
+                    radLeaderPoints.Add(tg.CreatePoint2d(radNoteX, radNoteY))
+                    radLeaderPoints.Add(radIntent)
+
+                    Dim radTekst As String
+                    radTekst = "R" & radiusMM.ToString( _
+                        "0.##", _
+                        System.Globalization.CultureInfo.GetCultureInfo("nl-NL"))
+
+                    ' Reserveer links en rechts van het anker: tekstuitlijning hangt van de leader af.
+                    Dim radTekstBreedte As Double = Math.Max(0.7, radTekst.Length * 0.18)
+                    randTekstVakken.Add(New Double() {radNoteX - radTekstBreedte, radNoteY - 0.25, _
+                        radNoteX + radTekstBreedte, radNoteY + 0.25})
+
+                    Dim radLeader As Inventor.LeaderNote
+                    radLeader = sheet.DrawingNotes.LeaderNotes.Add( _
+                        radLeaderPoints, _
+                        radTekst)
+
+                End If
+            Next
+        Catch exRadius As Exception
+            MessageBox.Show( _
+                "Radiusaanduidingen konden niet volledig worden geplaatst." & _
+                vbCrLf & vbCrLf & exRadius.Message, _
+                "Rotoras DWG Generator v0.10.2")
+        End Try
+
+
+        ' ====================================================
+        ' 16C. AFSCHUININGEN ONDER DOORSNEDE A-A
+        ' ====================================================
+        ' Zelfde leader-methode als de radiusaanduidingen.
+        ' Maat is axiale lengte; hoek wordt vanaf de asrichting gemeten.
+        ' Data per sectie: buitenmaat|hoek|eindlinksmaat|hoek|eindrechtsmaat|hoek.
+        Try
+            Dim afDwgTaken As New List(Of Double())
+            Dim afDwgRijen() As String = propAfschuiningData.Split(";"c)
+            Dim afDwgBegin As Double = 0.0
+            For afDwgI As Integer = 0 To dwgLengtes.Count - 1
+                Dim afDwgData(5) As Double
+                If afDwgI < afDwgRijen.Length Then
+                    Dim afDwgVelden() As String = afDwgRijen(afDwgI).Split("|"c)
+                    For afDwgJ As Integer = 0 To Math.Min(5, afDwgVelden.Length - 1)
+                        Double.TryParse(afDwgVelden(afDwgJ).Trim().Replace(",", "."), _
+                            System.Globalization.NumberStyles.Any, _
+                            System.Globalization.CultureInfo.InvariantCulture, afDwgData(afDwgJ))
+                    Next
+                End If
+                Dim afDwgEinde As Double = afDwgBegin + dwgLengtes(afDwgI)
+                If afDwgI < dwgLengtes.Count - 1 Then
+                    Dim afDwgKlein As Double = Math.Min(dwgDiameters(afDwgI), dwgDiameters(afDwgI + 1)) / 2.0
+                    Dim afDwgGroot As Double = Math.Max(dwgDiameters(afDwgI), dwgDiameters(afDwgI + 1)) / 2.0
+                    Dim afDwgRichting As Double = If(dwgDiameters(afDwgI) < dwgDiameters(afDwgI + 1), 1.0, -1.0)
+                    Dim afDwgSoort As String = dwgOvergangen(afDwgI).Trim().ToLowerInvariant()
+                    If (afDwgSoort = "chamfer" OrElse afDwgSoort = "c" OrElse afDwgSoort = "afschuining") AndAlso dwgRadii(afDwgI) > 0 Then
+                        ' Binnenrand: midden van de bestaande 45-graden overgang.
+                        Dim afDwgBinnenMaat As Double = dwgRadii(afDwgI)
+                        afDwgTaken.Add(New Double() {afDwgEinde - afDwgRichting * afDwgBinnenMaat / 2.0, _
+                            afDwgKlein + afDwgBinnenMaat / 2.0, afDwgBinnenMaat, 45.0, -afDwgRichting, 0.0})
+                    End If
+                    If afDwgData(0) > 0 AndAlso afDwgData(1) > 0 AndAlso afDwgData(1) < 90 Then
+                        Dim afDwgDrop As Double = afDwgData(0) * Math.Tan(afDwgData(1) * Math.PI / 180.0)
+                        afDwgTaken.Add(New Double() {afDwgEinde + afDwgRichting * afDwgData(0) / 2.0, _
+                            afDwgGroot - afDwgDrop / 2.0, afDwgData(0), afDwgData(1), afDwgRichting, 0.0})
+                    End If
+                End If
+                If afDwgI = 0 AndAlso afDwgData(2) > 0 AndAlso afDwgData(3) > 0 AndAlso afDwgData(3) < 90 Then
+                    afDwgTaken.Add(New Double() {afDwgData(2) / 2.0, _
+                        dwgDiameters(afDwgI) / 2.0 - afDwgData(2) * Math.Tan(afDwgData(3) * Math.PI / 180.0) / 2.0, _
+                        afDwgData(2), afDwgData(3), 1.0, -1.0})
+                End If
+                If afDwgI = dwgLengtes.Count - 1 AndAlso afDwgData(4) > 0 AndAlso afDwgData(5) > 0 AndAlso afDwgData(5) < 90 Then
+                    afDwgTaken.Add(New Double() {afDwgEinde - afDwgData(4) / 2.0, _
+                        dwgDiameters(afDwgI) / 2.0 - afDwgData(4) * Math.Tan(afDwgData(5) * Math.PI / 180.0) / 2.0, _
+                        afDwgData(4), afDwgData(5), -1.0, 1.0})
+                End If
+                afDwgBegin = afDwgEinde
+            Next
+
+            Dim afDwgNummer As Integer = 0
+            For Each afDwgTaak As Double() In afDwgTaken
+                afDwgNummer += 1
+                Dim afDwgX As Double = asLinksX + tekenBreedte * afDwgTaak(0) / dataTotaleLengte
+                Dim afDwgY As Double = sectionView.Center.Y - afDwgTaak(1) / 10.0 * viewScale
+                Dim afDwgSketch As Inventor.DrawingSketch = sheet.Sketches.Add
+                afDwgSketch.Name = "Rotoras Afschuining helper " & afDwgNummer
+                afDwgSketch.Edit()
+                Dim afDwgHelper As Inventor.SketchLine = afDwgSketch.SketchLines.AddByTwoPoints( _
+                    tg.CreatePoint2d(afDwgX - 0.03, afDwgY), tg.CreatePoint2d(afDwgX + 0.03, afDwgY))
+                afDwgHelper.Construction = True
+                afDwgSketch.ExitEdit()
+                Dim afDwgIntent As Inventor.GeometryIntent = sheet.CreateGeometryIntent(afDwgHelper)
+                Dim afDwgPunten As Inventor.ObjectCollection = invApp.TransientObjects.CreateObjectCollection
+                ' Dicht onder de lokale afschuining; twee compacte teksthoogten.
+                Dim afDwgNoteY As Double = afDwgY - 0.45 - ((afDwgNummer - 1) Mod 2) * 0.18
+                Dim afDwgCultuur As System.Globalization.CultureInfo = System.Globalization.CultureInfo.GetCultureInfo("nl-NL")
+                Dim afDwgTekst As String = afDwgTaak(2).ToString("0.###", afDwgCultuur) & " × " & afDwgTaak(3).ToString("0.###", afDwgCultuur) & "°"
+                Dim afDwgNoteX As Double = afDwgX + afDwgTaak(4) * 0.55
+                Dim afDwgTekstBreedte As Double = Math.Max(1.0, afDwgTekst.Length * 0.18)
+                If afDwgTaak(5) < 0 Then
+                    afDwgNoteX = asLinksX - 0.55
+                ElseIf afDwgTaak(5) > 0 Then
+                    afDwgNoteX = asLinksX + tekenBreedte + 0.55
+                End If
+                Dim afDwgVrij As Boolean = False
+                ' Zak alleen wanneer het tekstvak een eerdere aanduiding raakt.
+                ' Marge omvat teksthoogte en vrije ruimte; ook eerdere afschuiningen tellen mee.
+                Do Until afDwgVrij
+                    afDwgVrij = True
+                    For Each afDwgVak As Double() In randTekstVakken
+                        If afDwgNoteX - afDwgTekstBreedte < afDwgVak(2) AndAlso _
+                            afDwgNoteX + afDwgTekstBreedte > afDwgVak(0) AndAlso _
+                            afDwgNoteY - 0.25 < afDwgVak(3) AndAlso afDwgNoteY + 0.25 > afDwgVak(1) Then
+                            afDwgNoteY = afDwgVak(1) - 0.30
+                            afDwgVrij = False
+                            Exit For
+                        End If
+                    Next
+                Loop
+                randTekstVakken.Add(New Double() {afDwgNoteX - afDwgTekstBreedte, afDwgNoteY - 0.25, _
+                    afDwgNoteX + afDwgTekstBreedte, afDwgNoteY + 0.25})
+                afDwgPunten.Add(tg.CreatePoint2d(afDwgNoteX, afDwgNoteY))
+                afDwgPunten.Add(afDwgIntent)
+                sheet.DrawingNotes.LeaderNotes.Add(afDwgPunten, afDwgTekst)
+            Next
+        Catch afDwgFout As Exception
+            MessageBox.Show("Afschuiningaanduidingen konden niet volledig worden geplaatst." & _
+                vbCrLf & vbCrLf & afDwgFout.Message, "Rotoras DWG Generator v0.10.2")
+        End Try
+
+        ' Compacte kopgatnotities buiten de as, boven de hartlijn.
+        If propKopgaten <> "" Then
+            Try
+                For Each khDwgRecord As String In propKopgaten.Split(ChrW(10))
+                    Dim khDwgVelden() As String = khDwgRecord.Trim().Split(";"c)
+                    If khDwgVelden.Length < 12 Then Continue For
+                    Dim khDwgLinks As Boolean = khDwgVelden(1) = "left"
+                    Dim khDwgRichting As Double = If(khDwgLinks, 1.0, -1.0)
+                    Dim khDwgX As Double = If(khDwgLinks, asLinksX, asLinksX + tekenBreedte)
+                    Dim khDwgY As Double = sectionView.Center.Y
+                    Dim khDwgWaarden(11) As Double
+                    For khDwgJ As Integer = 5 To 11
+                        If Not Double.TryParse(khDwgVelden(khDwgJ).Trim().Replace(",", "."), _
+                            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, khDwgWaarden(khDwgJ)) Then
+                            Throw New Exception("Ongeldige kopgatmaat: " & khDwgVelden(khDwgJ))
+                        End If
+                    Next
+                    Dim khDwgBegin As Double = Math.Max(khDwgWaarden(9), khDwgWaarden(10))
+                    Dim khDwgDraadX As Double = khDwgX + khDwgRichting * (khDwgBegin + khDwgWaarden(7)) / 2.0 * viewScale / 10.0
+                    Dim khDwgDraadY As Double = khDwgY + khDwgWaarden(5) * viewScale / 20.0
+                    Dim khDwgSketch As DrawingSketch = sheet.Sketches.Add
+                    khDwgSketch.Name = "Kopgat aanduiding " & khDwgVelden(1)
+                    khDwgSketch.Edit()
+                    ' Pijl op de cilindrische draadzone, niet op de oorspronkelijke kophoek.
+                    Dim khDwgHelper As SketchLine = khDwgSketch.SketchLines.AddByTwoPoints( _
+                        tg.CreatePoint2d(khDwgDraadX - 0.015, khDwgDraadY), tg.CreatePoint2d(khDwgDraadX + 0.015, khDwgDraadY))
+                    khDwgHelper.Construction = True
+                    Dim khDwgKamerHelper As SketchLine = Nothing
+                    If khDwgWaarden(9) > 0 Then
+                        Dim khDwgKamerX As Double = khDwgX + khDwgRichting * khDwgWaarden(9) / 2.0 * viewScale / 10.0
+                        Dim khDwgKamerY As Double = khDwgY + khDwgWaarden(8) * viewScale / 20.0
+                        khDwgKamerHelper = khDwgSketch.SketchLines.AddByTwoPoints( _
+                            tg.CreatePoint2d(khDwgKamerX - 0.015, khDwgKamerY), tg.CreatePoint2d(khDwgKamerX + 0.015, khDwgKamerY))
+                        khDwgKamerHelper.Construction = True
+                    End If
+                    khDwgSketch.ExitEdit()
+                    Dim khDwgLabel As String = khDwgVelden(3)
+                    ' Standaard metrische spoed mag als M4 worden getoond; fijne spoed behouden.
+                    Dim khDwgStandaard() As String = {"M3x0.5", "M4x0.7", "M5x0.8", "M6x1", "M8x1.25", "M10x1.5", "M12x1.75", "M16x2", "M20x2.5"}
+                    For Each khDwgNorm As String In khDwgStandaard
+                        If khDwgLabel.Replace(" ", "").Replace(",", ".").ToLowerInvariant() = khDwgNorm.ToLowerInvariant() Then
+                            khDwgLabel = khDwgNorm.Split("x"c)(0)
+                            Exit For
+                        End If
+                    Next
+                    If khDwgVelden.Length > 12 AndAlso khDwgVelden(12) = "LH" Then khDwgLabel &= " LH"
+                    Dim khDwgTekst As String = khDwgLabel & vbCrLf & _
+                        "Gatdiepte " & khDwgWaarden(6).ToString("0") & " mm" & vbCrLf & _
+                        "Draaddiepte " & khDwgWaarden(7).ToString("0") & " mm"
+                    ' Beide dieptes vanaf het oorspronkelijke kopvlak; boorpunt niet meegerekend.
+                    Dim khDwgTekstX As Double = khDwgX - khDwgRichting * 0.65
+                    Dim khDwgTekstY As Double = khDwgY + 0.65
+                    Dim khDwgPunten As ObjectCollection = invApp.TransientObjects.CreateObjectCollection
+                    khDwgPunten.Add(tg.CreatePoint2d(khDwgTekstX, khDwgTekstY))
+                    khDwgPunten.Add(sheet.CreateGeometryIntent(khDwgHelper))
+                    Dim khDwgNote As LeaderNote = sheet.DrawingNotes.LeaderNotes.Add(khDwgPunten, khDwgTekst)
+                    khDwgNote.HorizontalJustification = If(khDwgLinks, Inventor.HorizontalTextAlignmentEnum.kAlignTextRight, Inventor.HorizontalTextAlignmentEnum.kAlignTextLeft)
+                    Dim khDwgKamerTekst As String = ""
+                    If khDwgWaarden(9) > 0 Then
+                        khDwgKamerTekst = "Ø" & khDwgWaarden(8).ToString("0.##") & "x" & khDwgWaarden(9).ToString("0.##") & "mm"
+                    End If
+                    If khDwgWaarden(10) > 0 Then
+                        If khDwgKamerTekst <> "" Then khDwgKamerTekst &= " vzv "
+                        khDwgKamerTekst &= khDwgWaarden(10).ToString("0.##") & "x" & khDwgWaarden(11).ToString("0.##") & "°"
+                    End If
+                    If khDwgKamerTekst <> "" Then
+                        Dim khDwgKamerPunten As ObjectCollection = invApp.TransientObjects.CreateObjectCollection
+                        khDwgKamerPunten.Add(tg.CreatePoint2d(khDwgTekstX, khDwgTekstY + 1.25))
+                        khDwgKamerPunten.Add(sheet.CreateGeometryIntent(If(khDwgKamerHelper Is Nothing, khDwgHelper, khDwgKamerHelper)))
+                        Dim khDwgKamerNote As LeaderNote = sheet.DrawingNotes.LeaderNotes.Add(khDwgKamerPunten, khDwgKamerTekst)
+                        khDwgKamerNote.HorizontalJustification = If(khDwgLinks, Inventor.HorizontalTextAlignmentEnum.kAlignTextRight, Inventor.HorizontalTextAlignmentEnum.kAlignTextLeft)
+                    End If
+                Next
+            Catch khDwgFout As Exception
+                MessageBox.Show("Kopgatnotities konden niet worden geplaatst: " & khDwgFout.Message, "Rotoras DWG Generator v0.10.2")
+            End Try
+        End If
+
+        ' ====================================================
+        ' 17. DIN76 LOSSE TEKST ONDER DRAAD
+        ' ====================================================
+        ' Geen leader of pijl.
+        ' Tekst ca. 50 mm onder de draad.
+        ' Linkerzijde tekst exact gelijk met begin draad.
+        ' ====================================================
+
+        Dim aantalDIN76Notities As Integer = 0
+
+        For i As Integer = 0 To dwgDIN76Posities.Count - 1
+
+            Dim dinPosMM As Double = dwgDIN76Posities(i)
+            Dim draadStartMM As Double = 0
+            Dim cumulatiefMM As Double = 0
+            Dim draadSectieGevonden As Boolean = False
+
+            For j As Integer = 0 To dwgLengtes.Count - 1
+
+                Dim sectieEindMM As Double = cumulatiefMM + dwgLengtes(j)
+
+                If Math.Abs(sectieEindMM - dinPosMM) < 0.05 Then
+                    draadStartMM = cumulatiefMM
+                    draadSectieGevonden = True
+                    Exit For
+                End If
+
+                cumulatiefMM = sectieEindMM
+            Next
+
+            If Not draadSectieGevonden Then Continue For
+
+            Dim draadStartX As Double
+            draadStartX = asLinksX + _
+                (tekenBreedte * (draadStartMM / dataTotaleLengte))
+
+            ' 12 mm op het tekenblad = 1,2 cm (Inventor sheet units).
+            Dim tekstY As Double
+            tekstY = (sectionView.Center.Y - (sectionView.Height / 2.0)) - 1.2
+
+            Try
+                Dim dinTekstPunt As Inventor.Point2d
+                dinTekstPunt = tg.CreatePoint2d(draadStartX, tekstY)
+
+                Dim dinTekst As Inventor.GeneralNote
+                dinTekst = sheet.DrawingNotes.GeneralNotes.AddFitted( _
+                    dinTekstPunt, _
+                    "Draaduitloop DIN 76")
+
+                aantalDIN76Notities += 1
+            Catch
+            End Try
+
+        Next
+
+
+        ' ====================================================
+        ' 18. MAATPRECISIE + LAATSTE UPDATE
+        ' ====================================================
+        '
+        ' Alle gewone maatwaarden: 2 decimalen, trailing zero's uit.
+        ' Tolerantiewaarden: 3 decimalen, trailing zero's aan.
+        ' ====================================================
+
+        Try
+            For Each tekeningMaat As Inventor.DrawingDimension In sheet.DrawingDimensions
+                Try
+                    tekeningMaat.Precision = 2
+                    tekeningMaat.TolerancePrecision = 3
+                    tekeningMaat.Style.TrailingZeroDisplay = False
+                    tekeningMaat.Style.ToleranceTrailingZeroDisplay = True
+                    tekeningMaat.Style.ToleranceLinearPrecision = 3
+                Catch
+                End Try
+            Next
+        Catch
+        End Try
+
+        drawDoc.Update()
+
+
+
+        ' ====================================================
+        ' 19. RESULTAAT
+        ' ====================================================
+
+        Dim schaalPercentage As Double
+
+        schaalPercentage = _
+            viewScale * 100.0
+
+
+        Dim lengteOpTekening As Double
+
+        lengteOpTekening = _
+            lengteMM * viewScale
+
+
+        Dim resultaatTekst As String
+
+
+        resultaatTekst = _
+            "DWG succesvol aangemaakt!" & _
+            vbCrLf & vbCrLf & _
+            "Versie: 0.9.17" & vbCrLf & _
+            "Rotoraslengte: " & _
+            Math.Round(lengteMM, 3) & " mm" & vbCrLf & _
+            "Schaal: " & _
+            Math.Round(schaalPercentage, 0) & "%" & vbCrLf & _
+            "Lengte op tekening: " & _
+            Math.Round(lengteOpTekening, 3) & " mm" & _
+            vbCrLf & vbCrLf & _
+            "Aantal secties: " & _
+            dwgDiameters.Count & vbCrLf & _
+            "Grootste diameter: Ø" & _
+            Math.Round(dataMaxDiameter, 3) & " mm" & vbCrLf & _
+            "Lengtematen geplaatst: " & _
+            aantalLengtematen & vbCrLf & _
+            "Ø-/draadmaten geplaatst: " & _
+            aantalDiametermaten & vbCrLf & _
+            "Spiebaanmaten geplaatst: " & _
+            aantalSpiebaanMaten
+
+
+        MessageBox.Show( _
+            resultaatTekst, _
+            "Rotoras DWG Generator v0.10.2")
+
+
+    Else
+
+
+        drawDoc.Update()
+
+
+        MessageBox.Show( _
+            "DWG aangemaakt, maar Rotoras_Diameters / " & _
+            "Rotoras_Lengtes konden niet worden gelezen.", _
+            "Rotoras DWG Generator v0.10.2")
+
+
+    End If
+
+
+End Sub
