@@ -1,0 +1,11 @@
+Sectie;Diameter;Passing;Lengte;OvergangRechts;Radius;Diepte;Breedte;SpieBegin;SpieLengte;SpieBreedte;SpieDiepte
+1;19;h6;53,5;DIN509E;1;0,2;2,5;9;36;8;11
+2;25;g6;209,3;;;;;;;;
+3;25;k5;20;DIN509E;1;0,2;2,5;;;;
+4;31,2;;34;DIN509E;1;0,2;2,5;;;;
+5;30,68;;112,9;;;;;;;;
+6;29,9;;29,6;DIN509E;1;0,2;2,5;;;;
+7;25;k5;27,15;;;;;;;;
+8;23,8;;2,15;;;;;;;;
+9;24,75;;2,1;;;;;;;;
+10;24;;29;;;;;;;;

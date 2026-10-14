@@ -1,0 +1,35 @@
+import {useEffect,useRef,useState} from 'react';
+import {fmt,keyways,number,total,type Project} from './model';
+import {shaftPath} from './geometry';
+interface Props { project:Project; selected:string; select:(id:string)=>void; invalid:boolean }
+export default function Preview({project:p,selected,select,invalid}:Props){
+  const [zoom,setZoom]=useState(1),[pan,setPan]=useState({x:0,y:0}),[dims,setDims]=useState(true),[view,setView]=useState<'side'|'top'>('side');const drag=useRef<{x:number;y:number;px:number;py:number}|null>(null);
+  const svg=useRef<SVGSVGElement>(null);
+  useEffect(()=>{const element=svg.current;if(!element)return;const wheel=(event:WheelEvent)=>{event.preventDefault();event.stopPropagation();setZoom(z=>Math.max(.6,Math.min(30,z*(event.deltaY<0?1.15:1/1.15))));};element.addEventListener('wheel',wheel,{passive:false});return ()=>element.removeEventListener('wheel',wheel);},[]);
+  const length=total(p)||100,maxD=Math.max(1,...p.sections.map(s=>number(s.diameter)||0));const pad=Math.max(20,length*.05),height=Math.max(maxD+pad*3,length*.28),span=length+pad*2;
+  const width=span/zoom,h=height/zoom,originX=(length-width)/2+pan.x,originY=-h/2+pan.y;
+  let pos=0;const rows=p.sections.map(s=>{const start=pos;pos+=number(s.length)||0;return {s,start,end:pos,r:(number(s.diameter)||0)/2};});
+  const font=Math.max(.15,span/(100*zoom)),stroke=span/(950*zoom); const reset=()=>{setZoom(1);setPan({x:0,y:0});};
+  const changeZoom=(z:number)=>setZoom(Math.max(.6,Math.min(30,z)));
+  return <section className="preview-card">
+    <div className="preview-head"><div><span className="eyebrow">LIVE TEKENING</span><h2>Rotorasprofiel <span className="live-dot"/></h2></div><div className="segmented"><button className={view==='side'?'active':''} onClick={()=>setView('side')}>Zijaanzicht</button><button className={view==='top'?'active':''} onClick={()=>setView('top')}>Bovenaanzicht</button></div></div>
+    <div className="canvas">
+      <svg ref={svg} aria-label="Live 2D rotoras" viewBox={`${originX} ${originY} ${width} ${h}`} onPointerDown={e=>{if(e.button!==0)return;e.preventDefault();drag.current={x:e.clientX,y:e.clientY,px:pan.x,py:pan.y};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{const d=drag.current;if(d){const rect=e.currentTarget.getBoundingClientRect();const scale=Math.max(width/rect.width,h/rect.height);setPan({x:d.px-(e.clientX-d.x)*scale,y:d.py-(e.clientY-d.y)*scale});}}} onPointerUp={()=>drag.current=null} onPointerCancel={()=>drag.current=null} onLostPointerCapture={()=>drag.current=null}>
+        <defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="#cbd8e5" strokeWidth={stroke*.35}/></pattern><linearGradient id="metal" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#9cb0c4"/><stop offset=".45" stopColor="#e4ebf2"/><stop offset="1" stopColor="#9cb0c4"/></linearGradient><clipPath id="shaft-clip"><path d={shaftPath(p)}/></clipPath></defs>
+        <rect x={originX} y={originY} width={width} height={h} fill="url(#grid)"/>
+        <path d={shaftPath(p)} fill="url(#metal)" stroke="#334d65" strokeWidth={stroke}/>
+        <g clipPath="url(#shaft-clip)">{rows.map(({s,start,end,r})=><rect key={s.id} x={start} y={-r} width={Math.max(0,end-start)} height={r*2} fill={s.id===selected?'#2e8ae822':'transparent'} onPointerDown={()=>select(s.id)}><title>Sectie {rows.findIndex(x=>x.s.id===s.id)+1}: Ø{fmt(r*2)} × {fmt(end-start)} mm</title></rect>)}
+        {keyways(p).filter(k=>number(k.length)>0).map(k=>view==='top'?<rect key={'k'+k.id} x={number(k.start)} y={-number(k.width)/2} width={number(k.length)} height={number(k.width)} rx={number(k.width)/2} fill="#e4b06066" stroke="#95602b" strokeWidth={stroke}/>:<path key={'k'+k.id} d={`M ${number(k.start)} ${-maxD/2-2} V ${-number(k.bottom)/2} H ${number(k.start)+number(k.length)} V ${-maxD/2-2}`} fill="none" stroke="#a56624" strokeWidth={stroke} strokeDasharray={`${stroke*5} ${stroke*3}`}/>)}
+        </g>
+        <g clipPath="url(#shaft-clip)">{rows.filter(({s})=>s.thread).map(({s,start,end,r})=>{const t=s.thread!,l=t.length==null||String(t.length).trim()===''?end-start:number(t.length),x=t.side==='left'?start:end-l;return <g key={'thread'+s.id}><path d={`M ${x} ${-r+Math.min(1,r*.1)} H ${x+l} M ${x} ${r-Math.min(1,r*.1)} H ${x+l}`} fill="none" stroke="#8553a3" strokeWidth={stroke} strokeDasharray={`${stroke*5} ${stroke*2}`}/><title>{t.designation} {t.handedness==='left'?'LH':'RH'}</title></g>;})}
+        {(['left','right'] as const).map(side=>{const hole=p.endHoles?.[side];if(!hole||!(number(hole.drillDepth)>0&&number(hole.drillDiameter)>0))return null;const dir=side==='left'?1:-1,base=side==='left'?0:length,bore=number(hole.drillDiameter)/2,depth=number(hole.drillDepth),cl=number(hole.chamberDepth),cr=cl>0?number(hole.chamberDiameter)/2:bore,c=number(hole.chamferLength),opening=cr+c*Math.tan(number(hole.chamferAngle)*Math.PI/180),tip=depth+bore/Math.tan(59*Math.PI/180);const upper=[[0,-opening],[c,-cr],...(cl>0?[[cl,-cr],[cl,-bore]]:[]),[depth,-bore],[tip,0]],lower=upper.slice(0,-1).reverse().map(([x,y])=>[x,-y]);return <g key={'hole'+side}><path d={'M '+[...upper,...lower].map(([x,y])=>`${base+dir*x} ${y}`).join(' L ')+' Z'} fill="#f4f7fb" stroke="#8553a3" strokeWidth={stroke}/><title>Kopgat {side==='left'?'links':'rechts'}: {hole.designation} {hole.handedness==='left'?'LH':'RH'}</title></g>;})}</g>
+        <path d={`M ${-pad*.5} 0 H ${length+pad*.5}`} stroke="#477390" strokeWidth={stroke*.6} strokeDasharray={`${stroke*8} ${stroke*2} ${stroke*2} ${stroke*2}`} fill="none"/>
+        {dims&&rows.map(({s,start,end,r},i)=><g key={'d'+s.id} fill={s.id===selected?'#126ace':'#526b82'} fontSize={font} textAnchor="middle">{end-start>font*6&&<text x={(start+end)/2} y={-r-font*1.2}>Ø{fmt(r*2)} {s.fit}</text>}<path d={`M ${start} ${maxD/2+font} V ${maxD/2+font*3} M ${end} ${maxD/2+font} V ${maxD/2+font*3} M ${start} ${maxD/2+font*2.2} H ${end}`} stroke="currentColor" strokeWidth={stroke*.6} fill="none"/>{end-start>font*4&&<text x={(start+end)/2} y={maxD/2+font*4}>{fmt(end-start)}</text>}{end-start>font&&<text x={(start+end)/2} y={r+font*1.2} fontSize={font*.75}>{i+1}</text>}</g>)}
+      </svg>
+      <div className="canvas-badge">mm · gelijke schaal X/Y {invalid?'· controleer invoer':''}</div>
+      <div className="zoom-tools"><button aria-label="Uitzoomen" onClick={()=>changeZoom(zoom/1.5)}>−</button><span>{Math.round(zoom*100)}%</span><button aria-label="Inzoomen" onClick={()=>changeZoom(zoom*1.5)}>+</button><button onClick={reset}>Passend</button></div>
+    </div>
+    <div className="preview-foot"><label><input type="checkbox" checked={dims} onChange={e=>setDims(e.target.checked)}/> Maatvoering</label><span>Zoom voor detailmaten · sleep om te verplaatsen</span><span><i className="legend-key"/> Spiebaan</span></div>
+    <div className="view-note">{view==='side'?'Spiebaanbodem wordt gestippeld getoond op de ingevoerde bodemdiameter.':'Spiebanen staan in bovenaanzicht met hun lengte, breedte en ronde uiteinden.'} De preview is geen vrijgegeven werktekening.</div>
+  </section>;
+}

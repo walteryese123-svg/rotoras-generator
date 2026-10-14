@@ -1,0 +1,11 @@
+Actuele regels:
+Part: Rotoras_Generator_V2.4.3.iLogicVb
+DWG: Rotoras_DWG_Generator_v0.10.2.ilogicvb
+
+Part leest oudere 12/18-koloms CSV en SPIE, plus nieuwe DRAAD/KOP-records.
+Draad: ISO Metric profile en ANSI Unified Screw Threads (UNC).
+Kopgaten: centrale boring + 118 graden punt, kamer, axiale afschuining en interne draadfeature.
+Boordiepte x en draadeinde y vanaf kopvlak, kamer tot d. Boorpunt na x.
+Draad begint onder de kamer of afschuining.
+De nieuwe draadfeatures zijn nog niet in Inventor getest.
+Originele regels staan als bronbestanden, niet als actieve regels.

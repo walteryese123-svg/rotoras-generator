@@ -1,0 +1,37 @@
+Rotoras Generator v0.22
+
+Pak alles uit. Open Startversie/Start_Rotoras.cmd.
+Open CSV / project om je eerdere as in te laden.
+
+WERKTEKENING
+Tabblad Werktekening toont één blad: doorsnede boven, aanzicht onder.
+Absolute lengtes vanaf beide kopse kanten tot het grootste asdeel.
+Doorsnede: lengtes, afschuiningen, radiussen, ondersnijdingen en kopgaten.
+Aanzicht: diameters en numerieke passingsafwijkingen; spiebaan-beginmaat vanaf de eigen assectie, lengte en breedte met N9 onderaan.
+Spiebaandiepte bij de breedtemaat: (lokale asdiameter - bodemdiameter) / 2.
+Teksten hebben geen witte achtergrond. DIN509-E staat alleen in de tabel.
+Kies A3 of A4. Vul materiaal, revisie en datum in.
+Sleep maatteksten voor een laatste afstelling. Herstellen zet ze terug op de automatische plaatsing.
+Project opslaan bewaart tekstblok en verplaatste maatteksten.
+Afdrukken / PDF: kies Opslaan als PDF, liggend, zonder browserkop-/voetteksten.
+SVG exporteert het volledige blad.
+De lokale tabel specificeert gangbare aspassingen tot Ø500, N9 voor spiebaanbreedtes tot 50. Niet-opgenomen waarden worden aangegeven; er worden geen toleranties geschat.
+
+INVENTOR
+Gebruik Inventor/Rotoras_Generator_V2.4.3.iLogicVb in een leeg Part.
+Daarna Inventor/Rotoras_DWG_Generator_v0.10.2.ilogicvb.
+Tabletinstallatie volgt later.
+
+Nieuw v0.22: het aanzicht gebruikt automatisch de vrije ruimte boven het tekstblok voor spiebaan- en N9-maten. Hulplijnen voor begin- en lengtematen van spiebanen lopen vanaf de hartlijn.
+
+Nieuw v0.22: breedte, N9-tolerantie en radiale diepte samen bij de spiebaanpijl. Diepte naast een omhoogwijzend pijltje met horizontale onderstreep.
+
+Nieuw v0.22: de profielschets blijft bovenaan zichtbaar tijdens scrollen door assecties, spiebanen en kopse draadgaten. Op smallere schermen staat de schets boven de invoer. Invoercontroles staan onder de kopgaten.
+
+Nieuw v0.22: titel, totale aslengte en profielschets blijven volledig vast. Alleen de invoerkolom vanaf Assecties scrolt, inclusief spiebanen en kopgaten.
+
+Nieuw v0.22: vast assectiepaneel met + en Verwijder/Undo altijd zichtbaar; alleen de tabelregels scrollen. Projectnummer en lengtegegevens staan rechts boven de schets. Spiebanen, kopgaten en invoercontroles staan in een zelfstandig scrollend gedeelte rechts onder de schets.
+
+Nieuw v0.22: compactere gegevens boven de schets. Gebruik Project opslaan (.rotoras.json) voor alle originele invoer, berekeningen, totale lengte, lengtewijzen en bewerkingen. Exporteer CSV is voor de berekende Inventor-maten. Oudere projecten behouden ook lengteberekeningen bij omrekening.
+
+Nieuw v0.22: wissel links tussen Assecties, Spiebanen en Tapgaten. De schets gebruikt het gehele rechterdeel onder de projectgegevens. Wisselen behoudt alle invoer; assectieknoppen blijven vast.

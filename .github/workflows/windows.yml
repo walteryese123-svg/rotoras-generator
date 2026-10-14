@@ -1,0 +1,31 @@
+name: Bouw Rotoras Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Installeer Rust MSVC
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+      - name: Selecteer Rust
+        run: rustup default stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:config
+      - name: Bouw Windows-installatiebestand
+        run: npm run windows -- --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rotoras-Generator-Windows-installatie
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error

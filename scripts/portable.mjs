@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+const html=fs.readFileSync('dist/index.html','utf8');
+const js=html.match(/<script[^>]*src="([^"]+)"[^>]*><\/script>/);
+const css=html.match(/<link[^>]*href="([^"]+\.css)"[^>]*>/);
+if(!js||!css)throw Error('Built JavaScript or stylesheet missing');
+let out=html.replace(js[0],()=>'<script type="module">'+fs.readFileSync(path.join('dist',js[1]),'utf8').replace(/<\/script/gi,'<\\/script')+'</script>');
+out=out.replace(css[0],()=>'<style>'+fs.readFileSync(path.join('dist',css[1]),'utf8')+'</style>');
+fs.mkdirSync('portable',{recursive:true});fs.writeFileSync('portable/Rotoras_Generator.html',out);
+console.log('Offline standalone app: portable/Rotoras_Generator.html');
