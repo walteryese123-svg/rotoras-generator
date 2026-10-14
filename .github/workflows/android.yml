@@ -21,6 +21,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -74,3 +77,7 @@ jobs:
             adb shell pidof nl.cftechniek.rotoras
             adb logcat -d -s AndroidRuntime:E > android-runtime.txt
             if grep -q 'FATAL EXCEPTION' android-runtime.txt; then cat android-runtime.txt; exit 1; fi
+            adb logcat -d -s RotorasReady:I > android-ready.txt
+            grep -q 'true' android-ready.txt
+            adb logcat -d -s RotorasJS:E > android-javascript.txt
+            if grep -q 'E RotorasJS' android-javascript.txt; then cat android-javascript.txt; exit 1; fi

@@ -3,6 +3,7 @@ package nl.cftechniek.rotoras;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
+import android.util.Log;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -28,12 +29,18 @@ public class MainActivity extends Activity {
         WebViewAssetLoader loader=new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/",new WebViewAssetLoader.AssetsPathHandler(this)).build();
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onPageFinished(WebView view,String url){
+                view.postDelayed(()->view.evaluateJavascript("Boolean(document.querySelector('h1') && document.querySelector('.shaft-panel') && window.RotorasAndroid)",value->Log.i("RotorasReady",value)),1000);
+            }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){return loader.shouldInterceptRequest(request.getUrl());}
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){
                 Uri u=request.getUrl();return !"https".equals(u.getScheme())||!"appassets.androidplatform.net".equals(u.getHost())||!u.getPath().startsWith("/assets/");
             }
         });
         web.setWebChromeClient(new WebChromeClient(){
+            @Override public boolean onConsoleMessage(ConsoleMessage message){
+                if(message.messageLevel()==ConsoleMessage.MessageLevel.ERROR)Log.e("RotorasJS",message.message());return true;
+            }
             @Override public boolean onJsConfirm(WebView view,String url,String message,JsResult result){
                 new AlertDialog.Builder(MainActivity.this).setMessage(message)
                     .setPositiveButton("OK",(d,w)->result.confirm())
