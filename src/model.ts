@@ -12,7 +12,9 @@ export type LengthMode = 'increment'|'left'|'right';
 export interface Section { thread?:ThreadSpec; id:string; diameter:Value; fit:string|null; length:Value; transition:Transition; radius:Value; depth:Value; width:Value; keyStart:Value; keyLength:Value; keyWidth:Value; keyBottom:Value; outerLength?:Value; outerAngle?:Value; leftEdge?:Edge; rightEdge?:Edge; lengthMode?:LengthMode; lengthInput?:Value; }
 export interface EndChamfer { length?:Value; angle?:Value }
 export interface Keyway {id:string; start:Value; length:Value; width:Value; bottom:Value; csvRow?:number}
-export interface InnerSection {id:string;diameter:Value;length:Value}\nexport interface Bore {id:string;side:Side;diameter:Value;depth:Value}\nexport interface Project {innerSections?:InnerSection[];bores?:Bore[]; drawing?:import('./drawing').DrawingSettings; endHoles?:{left?:EndHole;right?:EndHole}; version:1|2; name:string; sections:Section[]; leftEnd?:EndChamfer; rightEnd?:EndChamfer; overallLength?:Value; keyways?:Keyway[] }
+export interface InnerSection {id:string;diameter:Value;length:Value}
+export interface Bore {id:string;side:Side;diameter:Value;depth:Value}
+export interface Project {innerSections?:InnerSection[];bores?:Bore[]; drawing?:import('./drawing').DrawingSettings; endHoles?:{left?:EndHole;right?:EndHole}; version:1|2; name:string; sections:Section[]; leftEnd?:EndChamfer; rightEnd?:EndChamfer; overallLength?:Value; keyways?:Keyway[] }
 export interface Issue { section:number; text:string; severity:'error'|'warning'; keyway?:number }
 export interface Feature { type:Transition; r:number; depth:number; width:number; slope:number; small:number; large:number; ascending:boolean; adjusted:boolean; requested:number }
 export const DEFAULT_FOLDER = '\\\\ds01\\CadData$\\Inventor\\Klanten\\De bruyn\\CSV';
@@ -108,7 +110,8 @@ export function validate(p:Project):Issue[] {
     const n=i+1,next=p.sections[i+1];
     if(!(number(s.diameter)>0))add(n,'Diameter moet een positief getal zijn.');
     if(!(number(s.length)>0))add(n,'Lengte moet een positief getal zijn.');
-    if(/[;\r\n"]/.test(s.fit??''))add(n,'Passing bevat een ongeldig CSV-teken.');
+    if(/[;\r
+"]/.test(s.fit??''))add(n,'Passing bevat een ongeldig CSV-teken.');
     const numeric=['radius','depth','width','keyStart','keyLength','keyWidth','keyBottom'] as const;
     numeric.forEach(k=>{if(present(s[k])&&(!Number.isFinite(number(s[k]))||number(s[k])<0))add(n,`${k}: gebruik een getal van 0 of groter.`);});
     const innerN=next&&number(s.diameter)>number(next.diameter)?i+2:n;
@@ -165,7 +168,8 @@ export function validate(p:Project):Issue[] {
   return [...lengthIssues,...issues];
 }
 export function exportCsv(p:Project):string {
-  const errors=validate(p).filter(x=>x.severity==='error');if(errors.length)throw Error(errors.map(x=>`${x.section?`Sectie ${x.section}: `:''}${x.text}`).join('\n'));
+  const errors=validate(p).filter(x=>x.severity==='error');if(errors.length)throw Error(errors.map(x=>`${x.section?`Sectie ${x.section}: `:''}${x.text}`).join('
+'));
   p=toLegacyProject(resolveLengths(p));
   const cell=(v:Value|undefined)=>present(v)?fmt(number(v)):'';
   const extra=p.keyways!==undefined?keywaySlots(p).extra:[];
@@ -174,10 +178,14 @@ export function exportCsv(p:Project):string {
   const record=(cells:string[])=>records.push([...cells,...Array((extended?18:12)-cells.length).fill('')].join(';'));
   p.sections.forEach((s,i)=>{if(s.thread){const t=s.thread,r=threadRow(t)!;record(['DRAAD',String(i+1),r.type,r.designation,r.externalClass,t.side,cell(t.length),t.handedness==='left'?'LH':'']);}});
   for(const side of ['left','right'] as const){const h=p.endHoles?.[side];if(h){const r=threadRow(h)!;record(['KOP',side,r.type,r.designation,r.internalClass,cell(h.drillDiameter),cell(h.drillDepth),cell(h.threadEnd),cell(h.chamberDiameter),cell(h.chamberDepth),cell(h.chamferLength),cell(h.chamferAngle),h.handedness==='left'?'LH':'']);}}
-  return [...HEADERS,...(extended?CHAMFER_HEADERS:[])].join(';')+'\r\n'+p.sections.map((s,i)=>{const dims=dimensions(s,p.sections[i+1]);const cells=[String(i+1),cell(s.diameter),s.fit??'',cell(s.length),s.transition,cell(dims.radius),cell(dims.depth),cell(dims.width),cell(s.keyStart),cell(s.keyLength),cell(s.keyWidth),cell(s.keyBottom)];if(extended)cells.push(...pair(s.outerLength,s.outerAngle),...(i===0?pair(p.leftEnd?.length,p.leftEnd?.angle):['','']),...(i===p.sections.length-1?pair(p.rightEnd?.length,p.rightEnd?.angle):['','']));return cells.join(';');}).concat(extra.map(k=>['SPIE','','','','','','','',cell(k.start),cell(k.length),cell(k.width),cell(k.bottom),...(extended?['','','','','','']:[])].join(';'))).concat(records).join('\r\n')+'\r\n';
+  return [...HEADERS,...(extended?CHAMFER_HEADERS:[])].join(';')+'\r
+'+p.sections.map((s,i)=>{const dims=dimensions(s,p.sections[i+1]);const cells=[String(i+1),cell(s.diameter),s.fit??'',cell(s.length),s.transition,cell(dims.radius),cell(dims.depth),cell(dims.width),cell(s.keyStart),cell(s.keyLength),cell(s.keyWidth),cell(s.keyBottom)];if(extended)cells.push(...pair(s.outerLength,s.outerAngle),...(i===0?pair(p.leftEnd?.length,p.leftEnd?.angle):['','']),...(i===p.sections.length-1?pair(p.rightEnd?.length,p.rightEnd?.angle):['','']));return cells.join(';');}).concat(extra.map(k=>['SPIE','','','','','','','',cell(k.start),cell(k.length),cell(k.width),cell(k.bottom),...(extended?['','','','','','']:[])].join(';'))).concat(records).join('\r
+')+'\r
+';
 }
 export function importCsv(text:string,name='Rotoras_import'):Project {
-  const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim());if(lines.length<2)throw Error('CSV bevat geen secties.');
+  const lines=text.replace(/^\uFEFF/,'').split(/\r?
+/).filter(x=>x.trim());if(lines.length<2)throw Error('CSV bevat geen secties.');
   const names=lines[0].split(';').map(x=>x.trim().toLowerCase().replace(/\s/g,''));
   const old=names.length===11&&!names.includes('passing'),extended=names.length===18;const expected=old?HEADERS.filter(x=>x!=='Passing'):extended?[...HEADERS,...CHAMFER_HEADERS]:HEADERS;
   if(names.length!==expected.length||names.some((n,i)=>n!==expected[i].toLowerCase()))throw Error('Onbekende CSV-kolommen. Verwacht het Excel-formaat met 12 kolommen, of het oude formaat zonder Passing.');
