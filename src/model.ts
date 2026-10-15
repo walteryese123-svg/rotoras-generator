@@ -39,7 +39,7 @@ export function toSectionProject(p:Project):Project {
 }
 export function toLegacyProject(p:Project):Project {
   if(p.version===1){if(p.keyways===undefined)return p;const assigned=keywaySlots(p);return {...p,sections:p.sections.map((s,i)=>({...s,keyStart:assigned.rows[i]?.start??null,keyLength:assigned.rows[i]?.length??null,keyWidth:assigned.rows[i]?.width??null,keyBottom:assigned.rows[i]?.bottom??null}))};}
-  const q:Project={version:1,name:p.name,drawing:p.drawing,endHoles:p.endHoles,overallLength:p.overallLength,keyways:p.keyways,sections:p.sections.map(s=>({...s,transition:'',radius:null,depth:null,width:null,outerLength:null,outerAngle:null}))};
+  const q:Project={version:1,name:p.name,drawing:p.drawing,endHoles:p.endHoles,innerSections:p.innerSections,bores:p.bores,overallLength:p.overallLength,keyways:p.keyways,sections:p.sections.map(s=>({...s,transition:'',radius:null,depth:null,width:null,outerLength:null,outerAngle:null}))};
   p.sections.forEach((s,i)=>{const next=p.sections[i+1];if(!next)return;const up=number(s.diameter)<number(next.diameter);const inner=edge(p.sections[up?i:i+1],up?'right':'left'),outer=edge(p.sections[up?i+1:i],up?'left':'right');
     if(inner.type&&inner.type!=='OuterChamfer')Object.assign(q.sections[i],{transition:inner.type,radius:inner.radius??null,depth:inner.depth??null,width:inner.width??null});
     if(outer.type==='OuterChamfer')Object.assign(q.sections[i],{outerLength:outer.length??null,outerAngle:outer.angle??null});
@@ -91,7 +91,7 @@ export function validate(p:Project):Issue[] {
   const L=total(p);let cursor=0;const innerRanges=(p.innerSections??[]).map(s=>{const a=cursor;cursor+=number(s.length);return {a,b:cursor,d:number(s.diameter)};});
   if(cursor>L+1e-6)lengthIssues.push({section:0,severity:'error',text:'De binnencontour is langer dan de as.'});
   for(const r of innerRanges)if(!(r.d>0&&r.b>r.a))lengthIssues.push({section:0,severity:'error',text:'Binnensectie: diameter en lengte moeten positief zijn.'});
-  for(const b of p.bores??[])if(!(number(b.diameter)>0&&number(b.depth)>0&&number(b.depth)<=L))lengthIssues.push({section:0,severity:'error',text:'Boring: controleer diameter en diepte (maximaal de aslengte).'});
+  for(const b of p.bores??[])if(!(number(b.diameter)>0&&number(b.depth)>0&&number(b.depth)<=L))lengthIssues.push({section:0,severity:'error',text:'Boring: controleer diameter en diepte.'});
   const outerRanges=(()=>{let x=0;return p.sections.map(s=>{const a=x;x+=number(s.length);return {a,b:x,d:number(s.diameter)};});})();
   const cuts=[...innerRanges,...(p.bores??[]).map(b=>({a:b.side==='left'?0:L-number(b.depth),b:b.side==='left'?number(b.depth):L,d:number(b.diameter)}))];
   for(const cut of cuts)for(const out of outerRanges)if(cut.a<out.b&&cut.b>out.a&&cut.d>=out.d)lengthIssues.push({section:0,severity:'error',text:'Binnendiameter of boring is groter dan of gelijk aan de buitendiameter.'});
@@ -110,8 +110,7 @@ export function validate(p:Project):Issue[] {
     const n=i+1,next=p.sections[i+1];
     if(!(number(s.diameter)>0))add(n,'Diameter moet een positief getal zijn.');
     if(!(number(s.length)>0))add(n,'Lengte moet een positief getal zijn.');
-    if(/[;\r
-"]/.test(s.fit??''))add(n,'Passing bevat een ongeldig CSV-teken.');
+    if(/[;\r\n"]/.test(s.fit??''))add(n,'Passing bevat een ongeldig CSV-teken.');
     const numeric=['radius','depth','width','keyStart','keyLength','keyWidth','keyBottom'] as const;
     numeric.forEach(k=>{if(present(s[k])&&(!Number.isFinite(number(s[k]))||number(s[k])<0))add(n,`${k}: gebruik een getal van 0 of groter.`);});
     const innerN=next&&number(s.diameter)>number(next.diameter)?i+2:n;
@@ -168,8 +167,7 @@ export function validate(p:Project):Issue[] {
   return [...lengthIssues,...issues];
 }
 export function exportCsv(p:Project):string {
-  const errors=validate(p).filter(x=>x.severity==='error');if(errors.length)throw Error(errors.map(x=>`${x.section?`Sectie ${x.section}: `:''}${x.text}`).join('
-'));
+  const errors=validate(p).filter(x=>x.severity==='error');if(errors.length)throw Error(errors.map(x=>`${x.section?`Sectie ${x.section}: `:''}${x.text}`).join('\n'));
   p=toLegacyProject(resolveLengths(p));
   const cell=(v:Value|undefined)=>present(v)?fmt(number(v)):'';
   const extra=p.keyways!==undefined?keywaySlots(p).extra:[];
@@ -178,14 +176,10 @@ export function exportCsv(p:Project):string {
   const record=(cells:string[])=>records.push([...cells,...Array((extended?18:12)-cells.length).fill('')].join(';'));
   p.sections.forEach((s,i)=>{if(s.thread){const t=s.thread,r=threadRow(t)!;record(['DRAAD',String(i+1),r.type,r.designation,r.externalClass,t.side,cell(t.length),t.handedness==='left'?'LH':'']);}});
   for(const side of ['left','right'] as const){const h=p.endHoles?.[side];if(h){const r=threadRow(h)!;record(['KOP',side,r.type,r.designation,r.internalClass,cell(h.drillDiameter),cell(h.drillDepth),cell(h.threadEnd),cell(h.chamberDiameter),cell(h.chamberDepth),cell(h.chamferLength),cell(h.chamferAngle),h.handedness==='left'?'LH':'']);}}
-  return [...HEADERS,...(extended?CHAMFER_HEADERS:[])].join(';')+'\r
-'+p.sections.map((s,i)=>{const dims=dimensions(s,p.sections[i+1]);const cells=[String(i+1),cell(s.diameter),s.fit??'',cell(s.length),s.transition,cell(dims.radius),cell(dims.depth),cell(dims.width),cell(s.keyStart),cell(s.keyLength),cell(s.keyWidth),cell(s.keyBottom)];if(extended)cells.push(...pair(s.outerLength,s.outerAngle),...(i===0?pair(p.leftEnd?.length,p.leftEnd?.angle):['','']),...(i===p.sections.length-1?pair(p.rightEnd?.length,p.rightEnd?.angle):['','']));return cells.join(';');}).concat(extra.map(k=>['SPIE','','','','','','','',cell(k.start),cell(k.length),cell(k.width),cell(k.bottom),...(extended?['','','','','','']:[])].join(';'))).concat(records).join('\r
-')+'\r
-';
+  return [...HEADERS,...(extended?CHAMFER_HEADERS:[])].join(';')+'\r\n'+p.sections.map((s,i)=>{const dims=dimensions(s,p.sections[i+1]);const cells=[String(i+1),cell(s.diameter),s.fit??'',cell(s.length),s.transition,cell(dims.radius),cell(dims.depth),cell(dims.width),cell(s.keyStart),cell(s.keyLength),cell(s.keyWidth),cell(s.keyBottom)];if(extended)cells.push(...pair(s.outerLength,s.outerAngle),...(i===0?pair(p.leftEnd?.length,p.leftEnd?.angle):['','']),...(i===p.sections.length-1?pair(p.rightEnd?.length,p.rightEnd?.angle):['','']));return cells.join(';');}).concat(extra.map(k=>['SPIE','','','','','','','',cell(k.start),cell(k.length),cell(k.width),cell(k.bottom),...(extended?['','','','','','']:[])].join(';'))).concat(records).join('\r\n')+'\r\n';
 }
 export function importCsv(text:string,name='Rotoras_import'):Project {
-  const lines=text.replace(/^\uFEFF/,'').split(/\r?
-/).filter(x=>x.trim());if(lines.length<2)throw Error('CSV bevat geen secties.');
+  const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim());if(lines.length<2)throw Error('CSV bevat geen secties.');
   const names=lines[0].split(';').map(x=>x.trim().toLowerCase().replace(/\s/g,''));
   const old=names.length===11&&!names.includes('passing'),extended=names.length===18;const expected=old?HEADERS.filter(x=>x!=='Passing'):extended?[...HEADERS,...CHAMFER_HEADERS]:HEADERS;
   if(names.length!==expected.length||names.some((n,i)=>n!==expected[i].toLowerCase()))throw Error('Onbekende CSV-kolommen. Verwacht het Excel-formaat met 12 kolommen, of het oude formaat zonder Passing.');
