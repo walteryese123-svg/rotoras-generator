@@ -12,7 +12,7 @@ export type LengthMode = 'increment'|'left'|'right';
 export interface Section { thread?:ThreadSpec; id:string; diameter:Value; fit:string|null; length:Value; transition:Transition; radius:Value; depth:Value; width:Value; keyStart:Value; keyLength:Value; keyWidth:Value; keyBottom:Value; outerLength?:Value; outerAngle?:Value; leftEdge?:Edge; rightEdge?:Edge; lengthMode?:LengthMode; lengthInput?:Value; }
 export interface EndChamfer { length?:Value; angle?:Value }
 export interface Keyway {id:string; start:Value; length:Value; width:Value; bottom:Value; csvRow?:number}
-export interface Project { drawing?:import('./drawing').DrawingSettings; endHoles?:{left?:EndHole;right?:EndHole}; version:1|2; name:string; sections:Section[]; leftEnd?:EndChamfer; rightEnd?:EndChamfer; overallLength?:Value; keyways?:Keyway[] }
+export interface InnerSection {id:string;diameter:Value;length:Value}\nexport interface Bore {id:string;side:Side;diameter:Value;depth:Value}\nexport interface Project {innerSections?:InnerSection[];bores?:Bore[]; drawing?:import('./drawing').DrawingSettings; endHoles?:{left?:EndHole;right?:EndHole}; version:1|2; name:string; sections:Section[]; leftEnd?:EndChamfer; rightEnd?:EndChamfer; overallLength?:Value; keyways?:Keyway[] }
 export interface Issue { section:number; text:string; severity:'error'|'warning'; keyway?:number }
 export interface Feature { type:Transition; r:number; depth:number; width:number; slope:number; small:number; large:number; ascending:boolean; adjusted:boolean; requested:number }
 export const DEFAULT_FOLDER = '\\\\ds01\\CadData$\\Inventor\\Klanten\\De bruyn\\CSV';
@@ -27,7 +27,7 @@ export function edgeRole(p:Project,index:number,side:Side):'end'|'inner'|'outer'
 }
 export function toSectionProject(p:Project):Project {
   if(p.version===2)return separateKeyways(p);
-  const q:Project={version:2,name:p.name,drawing:p.drawing,endHoles:p.endHoles,overallLength:p.overallLength,keyways:p.keyways,sections:p.sections.map(s=>({...s,leftEdge:{type:''},rightEdge:{type:''},transition:'',radius:null,depth:null,width:null,outerLength:null,outerAngle:null}))};
+  const q:Project={version:2,name:p.name,drawing:p.drawing,endHoles:p.endHoles,innerSections:p.innerSections,bores:p.bores,overallLength:p.overallLength,keyways:p.keyways,sections:p.sections.map(s=>({...s,leftEdge:{type:''},rightEdge:{type:''},transition:'',radius:null,depth:null,width:null,outerLength:null,outerAngle:null}))};
   p.sections.forEach((s,i)=>{const next=p.sections[i+1];if(!next)return;const up=number(s.diameter)<number(next.diameter);
     if(s.transition){const target=q.sections[up?i:i+1];target[up?'rightEdge':'leftEdge']={type:s.transition,radius:s.radius,depth:s.depth,width:s.width};}
     if(number(s.outerLength)>0){const target=q.sections[up?i+1:i];target[up?'leftEdge':'rightEdge']={type:'OuterChamfer',length:s.outerLength,angle:s.outerAngle};}
@@ -86,6 +86,13 @@ export function validate(p:Project):Issue[] {
   p=resolveLengths(p);
   const lengthIssues:Issue[]=[...validateThreads(p),...(p.keyways!==undefined?validateKeyways(p):[])];
   if(p.keyways!==undefined)p={...p,sections:p.sections.map(s=>({...s,keyStart:null,keyLength:null,keyWidth:null,keyBottom:null}))};
+  const L=total(p);let cursor=0;const innerRanges=(p.innerSections??[]).map(s=>{const a=cursor;cursor+=number(s.length);return {a,b:cursor,d:number(s.diameter)};});
+  if(cursor>L+1e-6)lengthIssues.push({section:0,severity:'error',text:'De binnencontour is langer dan de as.'});
+  for(const r of innerRanges)if(!(r.d>0&&r.b>r.a))lengthIssues.push({section:0,severity:'error',text:'Binnensectie: diameter en lengte moeten positief zijn.'});
+  for(const b of p.bores??[])if(!(number(b.diameter)>0&&number(b.depth)>0&&number(b.depth)<=L))lengthIssues.push({section:0,severity:'error',text:'Boring: controleer diameter en diepte (maximaal de aslengte).'});
+  const outerRanges=(()=>{let x=0;return p.sections.map(s=>{const a=x;x+=number(s.length);return {a,b:x,d:number(s.diameter)};});})();
+  const cuts=[...innerRanges,...(p.bores??[]).map(b=>({a:b.side==='left'?0:L-number(b.depth),b:b.side==='left'?number(b.depth):L,d:number(b.diameter)}))];
+  for(const cut of cuts)for(const out of outerRanges)if(cut.a<out.b&&cut.b>out.a&&cut.d>=out.d)lengthIssues.push({section:0,severity:'error',text:'Binnendiameter of boring is groter dan of gelijk aan de buitendiameter.'});
   p.sections.forEach((s,i)=>{if(s.lengthMode&&s.lengthMode!=='increment'&&!(number(s.lengthInput)>=0))lengthIssues.push({section:i+1,severity:'error',text:'De absolute maat moet een getal van 0 of groter zijn.'});});
   if(present(p.overallLength)||p.sections.some(s=>s.lengthMode==='right')){if(!(number(p.overallLength)>0))lengthIssues.push({section:0,severity:'error',text:'Vul bovenaan een positieve totale aslengte in.'});else if(Math.abs(total(p)-number(p.overallLength))>1e-6)lengthIssues.push({section:p.sections.length,severity:'error',text:'De berekende aslengte wijkt af van de vaste totale aslengte. Pas de sectiematen aan; de totale aslengte blijft gelijk.'});}
 
